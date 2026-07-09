@@ -50,6 +50,7 @@ model User {
   
   // Relations
   kardexMovimientos KardexInventario[]
+  kardexComercial   KardexComercial[]
   autorizaciones    SalidaAutorizada[]
 }
 
@@ -108,8 +109,10 @@ model DetalleOrden {
   id                 String                @id @default(uuid())
   ordenId            String
   orden              OrdenesFabricacion    @relation(fields: [ordenId], references: [id], onDelete: Cascade)
-  productoId         String
-  producto           ProductosFichaTecnica @relation(fields: [productoId], references: [id])
+  productoId         String?
+  producto           ProductosFichaTecnica? @relation(fields: [productoId], references: [id])
+  productoComercialId String?
+  productoComercial   ProductoComercial?    @relation(fields: [productoComercialId], references: [id])
   largo              Float                 // length in meters
   ancho              Float                 // width in meters
   espesor            Float                 // thickness in inches or mm
@@ -150,4 +153,32 @@ model SalidaAutorizada {
   jefeTallerId   String
   jefeTaller     User               @relation(fields: [jefeTallerId], references: [id])
   autorizadoEn   DateTime           @default(now())
+}
+
+model ProductoComercial {
+  id            String            @id @default(uuid())
+  codigo        String            @unique
+  nombre        String
+  descripcion   String?
+  precioVenta   Float?
+  stockActual   Float             @default(0)
+  stockMinimo   Float             @default(0)
+  creadoEn      DateTime          @default(now())
+  actualizadoEn DateTime          @updatedAt
+
+  // Relations
+  kardexMovimientos KardexComercial[]
+  detallesOrden     DetalleOrden[]
+}
+
+model KardexComercial {
+  id                  String            @id @default(uuid())
+  productoComercialId String
+  productoComercial   ProductoComercial @relation(fields: [productoComercialId], references: [id])
+  tipoMovimiento      TipoMovimiento
+  cantidad            Float
+  motivo              String
+  usuarioId           String
+  usuario             User              @relation(fields: [usuarioId], references: [id])
+  creadoEn            DateTime          @default(now())
 }

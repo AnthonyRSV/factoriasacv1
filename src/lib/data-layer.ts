@@ -559,20 +559,18 @@ async function executeApprovalSideEffects(ordenId: string, tx: any) {
   // 2. Perform Stock deduction for each product via formulas (RF-11, RF-12)
   for (const d of details) {
     const formulaJson = JSON.parse(d.producto.formulaCalculo);
-    // Solve formula: standard formula strings we parse
-    // e.g. U-Bolt formula: (largo * 2 + ancho + 0.1) * cantidad
+    // Solve formula dynamically based on DB field (RF-11)
+    let formulaStr = formulaJson.formula.toLowerCase();
+    formulaStr = formulaStr.replace(/largo/g, d.largo.toString());
+    formulaStr = formulaStr.replace(/ancho/g, d.ancho.toString());
+    formulaStr = formulaStr.replace(/cantidad/g, d.cantidadSolicitada.toString());
+    formulaStr = formulaStr.replace(/espesor/g, d.espesor.toString());
+    
     let calculatedQty = 0;
-    const l = d.largo;
-    const w = d.ancho;
-    const c = d.cantidadSolicitada;
-
-    if (d.producto.codigo === 'PROD-UBOLT-58') {
-      calculatedQty = (l * 2 + w + 0.1) * c;
-    } else if (d.producto.codigo === 'PROD-ABRA-38') {
-      calculatedQty = (l + w * 2) * c;
-    } else {
-      // Default fallback formula: length * quantity
-      calculatedQty = l * c;
+    try {
+      calculatedQty = new Function(`return ${formulaStr}`)();
+    } catch (e) {
+      calculatedQty = d.largo * d.cantidadSolicitada;
     }
 
     // Deduct stock in PostgreSQL
@@ -624,17 +622,18 @@ async function executeApprovalSideEffectsMock(ordenId: string) {
     const prod = db.productosFichaTecnica.find(p => p.id === d.productoId);
     if (!prod) continue;
 
+    const formulaJson = JSON.parse(prod.formulaCalculo);
+    let formulaStr = formulaJson.formula.toLowerCase();
+    formulaStr = formulaStr.replace(/largo/g, d.largo.toString());
+    formulaStr = formulaStr.replace(/ancho/g, d.ancho.toString());
+    formulaStr = formulaStr.replace(/cantidad/g, d.cantidadSolicitada.toString());
+    formulaStr = formulaStr.replace(/espesor/g, d.espesor.toString());
+    
     let calculatedQty = 0;
-    const l = d.largo;
-    const w = d.ancho;
-    const c = d.cantidadSolicitada;
-
-    if (prod.codigo === 'PROD-UBOLT-58') {
-      calculatedQty = (l * 2 + w + 0.1) * c;
-    } else if (prod.codigo === 'PROD-ABRA-38') {
-      calculatedQty = (l + w * 2) * c;
-    } else {
-      calculatedQty = l * c;
+    try {
+      calculatedQty = new Function(`return ${formulaStr}`)();
+    } catch (e) {
+      calculatedQty = d.largo * d.cantidadSolicitada;
     }
 
     const mat = db.materiaPrima.find(mp => mp.id === prod.materiaPrimaId);

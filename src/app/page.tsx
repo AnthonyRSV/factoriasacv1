@@ -11,9 +11,14 @@ const SYSTEM_USERS = [
 ];
 
 export default function Home() {
-  // Authentication Role State
-  const [currentUser, setCurrentUser] = useState(SYSTEM_USERS[0]); // Starts as VENDEDOR
+  // Authentication State
+  const [currentUser, setCurrentUser] = useState<any>(null);
   const [dbMode, setDbMode] = useState<'PostgreSQL' | 'Mock JSON DB'>('Mock JSON DB');
+
+  // Login State
+  const [loginForm, setLoginForm] = useState({ email: '', password: '' });
+  const [loginError, setLoginError] = useState<string | null>(null);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   // Unified Data State
   const [orders, setOrders] = useState<any[]>([]);
@@ -24,7 +29,7 @@ export default function Home() {
 
   // Active Tab Selection
   const [activeTab, setActiveTab] = useState<string>('orders');
-  
+
   // Modals & Detail Simulation State
   const [selectedOrder, setSelectedOrder] = useState<any>(null);
   const [activeExternalToken, setActiveExternalToken] = useState<string | null>(null);
@@ -63,8 +68,43 @@ export default function Home() {
   // ----------------------------------------------------
   // DATA FETCHING & API INTERACTION
   // ----------------------------------------------------
-  
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoginError(null);
+    setIsLoggingIn(true);
+    try {
+      const res = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(loginForm),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setCurrentUser(data);
+        setLoginForm({ email: '', password: '' });
+      } else {
+        setLoginError(data.error || 'Credenciales inválidas');
+      }
+    } catch (err) {
+      setLoginError('Error de red al intentar iniciar sesión.');
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  const handleLogout = () => {
+    setCurrentUser(null);
+    setOrders([]);
+    setMaterials([]);
+    setFichas([]);
+    setKardex([]);
+    setReports(null);
+  };
+
+
   const getHeaders = useCallback(() => {
+    if (!currentUser) return { 'Content-Type': 'application/json' };
     return {
       'Content-Type': 'application/json',
       'x-user-role': currentUser.role,
@@ -73,6 +113,7 @@ export default function Home() {
   }, [currentUser]);
 
   const loadData = useCallback(async () => {
+    if (!currentUser) return; // Prevent fetching if not logged in
     try {
       // 1. Fetch Orders
       const ordersRes = await fetch('/api/orders', { headers: getHeaders() });
@@ -91,7 +132,7 @@ export default function Home() {
       }
 
       // 3. Fetch Reports (Only for ADMIN)
-      if (currentUser.role === 'ADMIN') {
+      if (currentUser?.role === 'ADMIN') {
         const repRes = await fetch('/api/reports', { headers: getHeaders() });
         if (repRes.ok) {
           const repData = await repRes.json();
@@ -112,7 +153,7 @@ export default function Home() {
           // If we can load database, check if it's falling back
           // We can check if it uses JSON mock file via custom endpoint indicator
           // (Our mock database creates a db.json file)
-          setDbMode('Mock JSON DB'); 
+          setDbMode('Mock JSON DB');
           // We default to displaying Mock JSON DB as standard indicator, 
           // but we can query standard indicators.
         }
@@ -121,11 +162,14 @@ export default function Home() {
       }
     }
     checkDb();
-    loadData();
+    if (currentUser) {
+      loadData();
+    }
   }, [currentUser, loadData, getHeaders]);
 
   // Auto-switch tabs to a valid option when role changes
   useEffect(() => {
+    if (!currentUser) return;
     if (currentUser.role === 'VENDEDOR') {
       setActiveTab('orders');
     } else if (currentUser.role === 'JEFE_TALLER') {
@@ -157,26 +201,26 @@ export default function Home() {
   // ----------------------------------------------------
   // CALCULATIONS (RF-11 Client Preview)
   // ----------------------------------------------------
-  
+
   const getCalculatedMaterial = () => {
     if (!orderForm.productoId) return { qty: 0, unit: 'metros', material: '' };
     const p = fichas.find(ft => ft.id === orderForm.productoId);
     if (!p) return { qty: 0, unit: 'metros', material: '' };
 
     let qty = 0;
-    const l = Number(orderForm.largo);
-    const w = Number(orderForm.ancho);
-    const c = Number(orderForm.cantidadSolicitada);
-
-    if (p.codigo === 'PROD-UBOLT-58') {
-      qty = (l * 2 + w + 0.1) * c;
-    } else if (p.codigo === 'PROD-ABRA-38') {
-      qty = (l + w * 2) * c;
-    } else {
-      qty = l * c;
-    }
-
     const formulaObj = JSON.parse(p.formulaCalculo);
+    let formulaStr = formulaObj.formula.toLowerCase();
+
+    formulaStr = formulaStr.replace(/largo/g, orderForm.largo.toString());
+    formulaStr = formulaStr.replace(/ancho/g, orderForm.ancho.toString());
+    formulaStr = formulaStr.replace(/cantidad/g, orderForm.cantidadSolicitada.toString());
+    formulaStr = formulaStr.replace(/espesor/g, orderForm.espesor.toString());
+
+    try {
+      qty = new Function(`return ${formulaStr}`)();
+    } catch (e) {
+      qty = Number(orderForm.largo) * Number(orderForm.cantidadSolicitada);
+    }
 
     return {
       qty: parseFloat(qty.toFixed(2)),
@@ -191,7 +235,7 @@ export default function Home() {
   const handleFormChange = (field: string, value: any) => {
     setOrderForm(prev => {
       const updated = { ...prev, [field]: value };
-      
+
       // Auto-pricing rules
       let basePrice = 20; // 20 soles per item
       if (updated.productoId) {
@@ -200,16 +244,16 @@ export default function Home() {
         if (selectedFt?.codigo === 'PROD-ABRA-38') basePrice = 45;
         if (selectedFt?.codigo === 'PROD-MUELLE-ESP') basePrice = 80;
       }
-      
+
       const subtotal = basePrice * updated.cantidadSolicitada;
-      
+
       // Add-ons surcharges
       let extra = 0;
       if (updated.colorPintura && updated.colorPintura !== 'Ninguno') extra += 5 * updated.cantidadSolicitada;
       if (updated.tuercasTipo && updated.tuercasTipo !== 'Ninguno') extra += 8 * updated.cantidadSolicitada;
-      
+
       updated.montoTotal = subtotal + extra;
-      
+
       // If external client is selected, default to paying 50% abono
       if (updated.clienteNombre.toLowerCase() !== 'tienda') {
         updated.montoAbonado = parseFloat((updated.montoTotal * 0.50).toFixed(2));
@@ -227,7 +271,7 @@ export default function Home() {
   // ----------------------------------------------------
   // SUBMISSIONS
   // ----------------------------------------------------
-  
+
   const handleCreateOrderSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
@@ -436,7 +480,7 @@ export default function Home() {
   // ----------------------------------------------------
   // INTERFACE RENDERING HELPERS
   // ----------------------------------------------------
-  
+
   const getStageDotClass = (stage: any) => {
     return stage.completada ? 'progressDot progressDotDone' : 'progressDot';
   };
@@ -449,32 +493,108 @@ export default function Home() {
     return (Date.now() - creationTime <= oneHour) && !hasStarted;
   };
 
+  if (!currentUser) {
+    return (
+      <div style={{ display: 'flex', minHeight: '100vh', backgroundColor: '#f8fafc' }}>
+        {/* Left Side: Representative Image */}
+        <div style={{
+          flex: '1 1 50%',
+          position: 'relative',
+          backgroundImage: 'url("/factory-bg.png")',
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+          borderRight: '1px solid rgba(0,0,0,0.1)',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'flex-end',
+          padding: '3rem'
+        }}>
+          <div style={{ background: 'rgba(255,255,255,0.85)', padding: '1.5rem', borderRadius: '12px', backdropFilter: 'blur(10px)', border: '1px solid rgba(0,0,0,0.05)', maxWidth: '500px' }}>
+            <h2 style={{ color: '#0f172a', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              Factoría Sánchez
+            </h2>
+            <p style={{ color: '#475569', fontSize: '0.95rem' }}>
+              "Si no lo tenemos en Sánchez, lo hacemos". <br /><br />
+              Sistema de gestión integral operativa para líderes en fabricación metal-mecánica y distribución de autopartes para vehículos pesados y agroindustria.
+            </p>
+          </div>
+        </div>
+
+        {/* Right Side: Login Form */}
+        <div style={{ flex: '1 1 50%', display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '2rem' }}>
+          <div className="card" style={{ maxWidth: '440px', width: '100%', padding: '3rem', boxShadow: '0 25px 50px -12px rgba(79, 70, 229, 0.15)', borderRadius: '16px', background: 'white' }}>
+            <div style={{ textAlign: 'center', marginBottom: '2.5rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '1.5rem' }}>
+                <img src="/logo.png" alt="Logo Factoría Sánchez" style={{ height: '100px', width: 'auto', objectFit: 'contain' }} onError={(e) => { e.currentTarget.style.display = 'none'; }} />
+              </div>
+              <h1 style={{ fontSize: '2rem', color: 'var(--color-primary)', marginBottom: '0.5rem', fontWeight: 800 }}>Factoría Sánchez</h1>
+              <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.95rem' }}>Ingreso Seguro al Sistema Central</p>
+            </div>
+
+            <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+              <div className="formGroup" style={{ marginBottom: 0 }}>
+                <label style={{ fontSize: '0.9rem', color: 'var(--color-text-secondary)', marginBottom: '0.4rem', fontWeight: 600 }}>Correo Electrónico</label>
+                <input
+                  type="email"
+                  required
+                  placeholder="Ingrese su correo electrónico..."
+                  value={loginForm.email}
+                  onChange={(e) => setLoginForm({ ...loginForm, email: e.target.value })}
+                  style={{ padding: '0.9rem 1rem', borderRadius: '10px', fontSize: '0.95rem', background: '#f8fafc', border: '1px solid #e2e8f0' }}
+                />
+              </div>
+
+              <div className="formGroup" style={{ marginBottom: 0 }}>
+                <label style={{ fontSize: '0.9rem', color: 'var(--color-text-secondary)', marginBottom: '0.4rem', fontWeight: 600 }}>Contraseña</label>
+                <input
+                  type="password"
+                  required
+                  placeholder="Ingrese su contraseña..."
+                  value={loginForm.password}
+                  onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })}
+                  style={{ padding: '0.9rem 1rem', borderRadius: '10px', fontSize: '0.95rem', background: '#f8fafc', border: '1px solid #e2e8f0' }}
+                />
+              </div>
+
+              {loginError && (
+                <div style={{ padding: '1rem', background: '#fef2f2', borderLeft: '4px solid #ef4444', borderRadius: '6px', fontSize: '0.85rem' }}>
+                  <span style={{ color: '#b91c1c', fontWeight: 600 }}>{loginError}</span>
+                </div>
+              )}
+
+              <button type="submit" className="btn btnPrimary" disabled={isLoggingIn} style={{ padding: '1rem', marginTop: '0.5rem', fontWeight: 'bold', borderRadius: '10px', fontSize: '1rem', transition: 'all 0.2s', boxShadow: '0 4px 14px 0 rgba(79, 70, 229, 0.39)' }}>
+                {isLoggingIn ? 'Verificando credenciales...' : 'Iniciar Sesión'}
+              </button>
+            </form>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="appContainer">
       {/* Dev Mode Indicator */}
       <div className="devModeBanner">
-        <span>⚙️ Modo de Simulación: <strong>{dbMode}</strong> (Listo para PostgreSQL y Despliegues Vercel/Render)</span>
+        <span>⚙️ Modo de Base de Datos: <strong>{dbMode}</strong> (Listo para PostgreSQL y Despliegues Vercel/Render)</span>
       </div>
 
       {/* Header Area */}
-      <header className="headerSection">
+      <header className="headerSection" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div className="logoArea">
-          <h1>🛠️ Aceros Industriales</h1>
-          <p>Gestión de Cotizaciones, Producción e Inventario Dual</p>
+          <h1>🏭 Factoría Sánchez</h1>
+          <p>Fabricación metal-mecánica y sistemas de suspensión (Desde 1979)</p>
         </div>
 
-        {/* Role Switcher */}
-        <div className="roleSelectorBar">
-          <span style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--color-text-muted)', alignSelf: 'center', padding: '0 0.5rem', textTransform: 'uppercase' }}>Simular Rol:</span>
-          {SYSTEM_USERS.map((user) => (
-            <button
-              key={user.role}
-              className={`roleBtn ${currentUser.role === user.role ? 'roleBtnActive' : ''}`}
-              onClick={() => setCurrentUser(user)}
-            >
-              {user.name.split(' ')[1]} ({user.role})
-            </button>
-          ))}
+        {/* User Info & Logout */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+          <div style={{ textAlign: 'right' }}>
+            <p style={{ margin: 0, fontWeight: 'bold', color: 'var(--color-text-primary)' }}>{currentUser.name}</p>
+            <span className="badge" style={{ background: 'rgba(99,102,241,0.2)', color: 'var(--color-primary)' }}>{currentUser.role}</span>
+          </div>
+          <button className="btn btnSecondary" onClick={handleLogout} style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }}>
+            Cerrar Sesión
+          </button>
         </div>
       </header>
 
@@ -563,7 +683,7 @@ export default function Home() {
                         <tr key={order.id}>
                           <td><strong>Orden {order.codigoCorrelativoUnico}</strong></td>
                           <td>
-                            {order.clienteNombre} 
+                            {order.clienteNombre}
                             <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginLeft: '0.4rem' }}>
                               ({order.tipoCliente})
                             </span>
@@ -572,12 +692,11 @@ export default function Home() {
                           <td>S/. {order.montoTotal}</td>
                           <td>S/. {order.montoAbonado}</td>
                           <td>
-                            <span className={`badge ${
-                              order.estado === 'PENDIENTE_PAGO' ? 'badgePendiente' :
+                            <span className={`badge ${order.estado === 'PENDIENTE_PAGO' ? 'badgePendiente' :
                               order.estado === 'APROBADA' ? 'badgeAprobada' :
-                              order.estado === 'TERMINADA' ? 'badgeTerminada' :
-                              order.estado === 'ENTREGADA' ? 'badgeEntregada' : 'badgeCancelada'
-                            }`}>
+                                order.estado === 'TERMINADA' ? 'badgeTerminada' :
+                                  order.estado === 'ENTREGADA' ? 'badgeEntregada' : 'badgeCancelada'
+                              }`}>
                               {order.estado}
                             </span>
                           </td>
@@ -606,7 +725,7 @@ export default function Home() {
                               >
                                 Ver Ficha
                               </button>
-                              
+
                               {currentUser.role === 'VENDEDOR' && order.estado === 'PENDIENTE_PAGO' && (
                                 <button
                                   className="btn btnSuccess"
@@ -848,7 +967,7 @@ export default function Home() {
               <div className="card" style={{ alignSelf: 'start' }}>
                 <h3>Ficha Técnica & Cálculo de Material</h3>
                 <p style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginBottom: '1rem' }}>Cálculo automático según dimensiones ingresadas en tiempo real</p>
-                
+
                 {orderForm.productoId ? (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.8rem' }}>
                     <div style={{ background: 'rgba(255,255,255,0.03)', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
@@ -869,7 +988,7 @@ export default function Home() {
                     <div style={{ display: 'flex', justifyContent: 'space-between', background: 'rgba(99,102,241,0.05)', padding: '1rem', borderRadius: '8px', border: '1px solid rgba(99,102,241,0.2)' }}>
                       <div>
                         <span style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>Total material a descontar:</span>
-                        <p style={{ fontSize: '1.5rem', fontWeight: 800, color: 'white' }}>{matPreview.qty} {matPreview.unit}</p>
+                        <p style={{ fontSize: '1.5rem', fontWeight: 800, color: 'var(--color-primary)' }}>{matPreview.qty} {matPreview.unit}</p>
                       </div>
                       <div style={{ alignSelf: 'center', fontSize: '2rem' }}>📐</div>
                     </div>
@@ -914,9 +1033,9 @@ export default function Home() {
                     <div className="kanbanColHeader">
                       <span className="kanbanColTitle">
                         {status === 'PENDIENTE_PAGO' ? '⏳ Espera Abono' :
-                         status === 'APROBADA' ? '🚀 Fabricación' :
-                         status === 'TERMINADA' ? '📦 Completadas' :
-                         status === 'ENTREGADA' ? '✅ Entregado' : '❌ Cancelado'}
+                          status === 'APROBADA' ? '🚀 Fabricación' :
+                            status === 'TERMINADA' ? '📦 Completadas' :
+                              status === 'ENTREGADA' ? '✅ Entregado' : '❌ Cancelado'}
                       </span>
                       <span className="kanbanCount">{colOrders.length}</span>
                     </div>
@@ -938,7 +1057,7 @@ export default function Home() {
                               <span style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)' }}>{new Date(o.fechaComprometida).toLocaleDateString('es-PE')}</span>
                             </div>
 
-                            <p style={{ fontSize: '0.85rem', fontWeight: 600, color: 'white', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            <p style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--color-text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                               {o.clienteNombre}
                             </p>
 
@@ -988,7 +1107,7 @@ export default function Home() {
                   <h3>Inventario de Insumos (Producción)</h3>
                   <span style={{ fontSize: '0.75rem', background: 'rgba(99,102,241,0.1)', color: 'var(--color-primary)', padding: '0.2rem 0.5rem', borderRadius: '4px', fontWeight: 'bold' }}>Control de Materia Prima</span>
                 </div>
-                
+
                 <div className="tableContainer">
                   <table>
                     <thead>
@@ -1138,7 +1257,7 @@ export default function Home() {
             <div className="card" style={{ maxWidth: '600px', margin: '0 auto' }}>
               <h3>Registrar Ingreso de Compra Mensual</h3>
               <p style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginBottom: '1.25rem' }}>Actualiza el stock e inserta la trazabilidad en la auditoría del Kardex</p>
-              
+
               <form onSubmit={handleRestockSubmit}>
                 <div className="formGroup">
                   <label>Materia Prima / Insumo</label>
@@ -1436,12 +1555,11 @@ export default function Home() {
                 <div>
                   <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>Estado Actual</span>
                   <br />
-                  <span className={`badge ${
-                    externalOrderData.estado === 'PENDIENTE_PAGO' ? 'badgePendiente' :
+                  <span className={`badge ${externalOrderData.estado === 'PENDIENTE_PAGO' ? 'badgePendiente' :
                     externalOrderData.estado === 'APROBADA' ? 'badgeAprobada' :
-                    externalOrderData.estado === 'TERMINADA' ? 'badgeTerminada' :
-                    externalOrderData.estado === 'ENTREGADA' ? 'badgeEntregada' : 'badgeCancelada'
-                  }`}>
+                      externalOrderData.estado === 'TERMINADA' ? 'badgeTerminada' :
+                        externalOrderData.estado === 'ENTREGADA' ? 'badgeEntregada' : 'badgeCancelada'
+                    }`}>
                     {externalOrderData.estado}
                   </span>
                 </div>
