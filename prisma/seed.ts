@@ -38,6 +38,12 @@ async function main() {
       passwordHash: almaceneroPassword,
       role: Role.ALMACENERO,
     },
+    {
+      name: 'Stiven Lopez',
+      email: 'tt9704925@gmail.com',
+      passwordHash: await bcrypt.hash('Stiven69Pass', salt),
+      role: Role.ADMIN,
+    },
   ];
 
   for (const u of users) {

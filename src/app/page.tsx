@@ -1,6 +1,75 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from 'react';
+import { signIn, signOut, useSession } from "next-auth/react";
+import { useSearchParams } from "next/navigation";
+import styles from './page.module.css';
+import {
+  LayoutDashboard,
+  ClipboardList,
+  PackageOpen,
+  BarChart3,
+  Users,
+  Plus,
+  Factory,
+  ListOrdered,
+  LogOut,
+  ShoppingCart,
+  AlertCircle,
+  CheckCircle2,
+  Truck,
+  XCircle,
+  Menu,
+  X,
+  Eye,
+  EyeOff,
+} from 'lucide-react';
+
+// Sidebar Button Component
+const SidebarButton = ({ active, icon, label, onClick }: { active: boolean, icon: React.ReactNode, label: string, onClick: () => void }) => {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '0.875rem',
+        padding: '0.75rem 0.875rem',
+        borderRadius: '10px',
+        background: active ? '#4F46E5' : 'transparent',
+        color: active ? '#FFFFFF' : '#475569',
+        border: 'none',
+        textAlign: 'left',
+        fontSize: '0.875rem',
+        fontWeight: 500,
+        cursor: 'pointer',
+        transition: 'all 0.2s ease',
+        width: '100%',
+      }}
+      onMouseOver={(e) => {
+        if (!active) {
+          e.currentTarget.style.background = '#EFF6FF';
+          e.currentTarget.style.color = '#2563EB';
+        }
+      }}
+      onMouseOut={(e) => {
+        if (!active) {
+          e.currentTarget.style.background = 'transparent';
+          e.currentTarget.style.color = '#475569';
+        }
+      }}
+    >
+      {React.cloneElement(icon as React.ReactElement, { 
+        strokeWidth: 2, 
+        style: { 
+          ...(icon as any).props?.style, 
+          color: active ? '#FFFFFF' : (icon as any).props?.style?.color || '#64748B' 
+        } 
+      })}
+      {label}
+    </button>
+  );
+};
 
 // Predefined Roles for testing RBAC
 const SYSTEM_USERS = [
@@ -11,14 +80,54 @@ const SYSTEM_USERS = [
 ];
 
 export default function Home() {
-  // Authentication State
+  // Authentication State with NextAuth
+  const { data: session, status, update } = useSession();
+  const searchParams = useSearchParams();
   const [currentUser, setCurrentUser] = useState<any>(null);
-  const [dbMode, setDbMode] = useState<'PostgreSQL' | 'Mock JSON DB'>('Mock JSON DB');
+  
+  // When session changes, update currentUser!
+  useEffect(() => {
+    if (status === "authenticated" && session?.user) {
+      setCurrentUser({
+        id: (session.user as any).id,
+        name: session.user.name,
+        email: session.user.email,
+        role: (session.user as any).role,
+      });
+    } else if (status === "unauthenticated") {
+      setCurrentUser(null);
+    }
+  }, [session, status]);
+  
+  // Users state for Usuarios tab
+  const [users, setUsers] = useState<any[]>([]);
+  
+  // Mobile sidebar state
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+  
+  // Check if mobile on resize
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth <= 768);
+    };
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
-  // Login State
+  // Login State (for legacy login with email/password)
   const [loginForm, setLoginForm] = useState({ email: '', password: '' });
   const [loginError, setLoginError] = useState<string | null>(null);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+
+  useEffect(() => {
+    const authError = searchParams.get('authError') ?? searchParams.get('error');
+    if (authError === 'not-registered' || authError === 'AccessDenied') {
+      setLoginError('Este kbro no esta registrado');
+    }
+  }, [searchParams]);
 
   // Unified Data State
   const [orders, setOrders] = useState<any[]>([]);
@@ -93,7 +202,8 @@ export default function Home() {
     }
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    await signOut({ redirect: false }); // Don't redirect, we'll handle state
     setCurrentUser(null);
     setOrders([]);
     setMaterials([]);
@@ -138,34 +248,22 @@ export default function Home() {
           const repData = await repRes.json();
           setReports(repData);
         }
+
+        // 4. Fetch Users (Only for ADMIN)
+        // Since there's no API yet, we'll use seed data for now
+        // We'll create an API endpoint later if needed
+        setUsers(SYSTEM_USERS);
       }
     } catch (err) {
       console.error('Error fetching data:', err);
     }
   }, [currentUser, getHeaders]);
 
-  // Check Database connection mode from API response header or test query
   useEffect(() => {
-    async function checkDb() {
-      try {
-        const res = await fetch('/api/inventory', { headers: getHeaders() });
-        if (res.ok) {
-          // If we can load database, check if it's falling back
-          // We can check if it uses JSON mock file via custom endpoint indicator
-          // (Our mock database creates a db.json file)
-          setDbMode('Mock JSON DB');
-          // We default to displaying Mock JSON DB as standard indicator, 
-          // but we can query standard indicators.
-        }
-      } catch (e) {
-        setDbMode('Mock JSON DB');
-      }
-    }
-    checkDb();
     if (currentUser) {
       loadData();
     }
-  }, [currentUser, loadData, getHeaders]);
+  }, [currentUser, loadData]);
 
   // Auto-switch tabs to a valid option when role changes
   useEffect(() => {
@@ -177,7 +275,7 @@ export default function Home() {
     } else if (currentUser.role === 'ALMACENERO') {
       setActiveTab('inventory');
     } else if (currentUser.role === 'ADMIN') {
-      setActiveTab('orders');
+      setActiveTab('dashboard');
       loadData();
     }
   }, [currentUser, loadData]);
@@ -495,25 +593,14 @@ export default function Home() {
 
   if (!currentUser) {
     return (
-      <div style={{ display: 'flex', minHeight: '100vh', backgroundColor: '#f8fafc' }}>
+      <div className={styles.authScreen}>
         {/* Left Side: Representative Image */}
-        <div style={{
-          flex: '1 1 50%',
-          position: 'relative',
-          backgroundImage: 'url("/factory-bg.png")',
-          backgroundSize: 'cover',
-          backgroundPosition: 'center',
-          borderRight: '1px solid rgba(0,0,0,0.1)',
-          display: 'flex',
-          flexDirection: 'column',
-          justifyContent: 'flex-end',
-          padding: '3rem'
-        }}>
-          <div style={{ background: 'rgba(255,255,255,0.85)', padding: '1.5rem', borderRadius: '12px', backdropFilter: 'blur(10px)', border: '1px solid rgba(0,0,0,0.05)', maxWidth: '500px' }}>
-            <h2 style={{ color: '#0f172a', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+        <div className={styles.authHero}>
+          <div className={styles.authHeroCard}>
+            <h2 style={{ color: '#1d4ed8', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
               Factoría Sánchez
             </h2>
-            <p style={{ color: '#475569', fontSize: '0.95rem' }}>
+            <p style={{ color: '#2563eb', fontSize: '0.95rem' }}>
               "Si no lo tenemos en Sánchez, lo hacemos". <br /><br />
               Sistema de gestión integral operativa para líderes en fabricación metal-mecánica y distribución de autopartes para vehículos pesados y agroindustria.
             </p>
@@ -521,8 +608,8 @@ export default function Home() {
         </div>
 
         {/* Right Side: Login Form */}
-        <div style={{ flex: '1 1 50%', display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '2rem' }}>
-          <div className="card" style={{ maxWidth: '440px', width: '100%', padding: '3rem', boxShadow: '0 25px 50px -12px rgba(79, 70, 229, 0.15)', borderRadius: '16px', background: 'white' }}>
+        <div className={styles.authFormWrap}>
+          <div className={styles.authCard}>
             <div style={{ textAlign: 'center', marginBottom: '2.5rem' }}>
               <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '1.5rem' }}>
                 <img src="/logo.png" alt="Logo Factoría Sánchez" style={{ height: '100px', width: 'auto', objectFit: 'contain' }} onError={(e) => { e.currentTarget.style.display = 'none'; }} />
@@ -546,14 +633,37 @@ export default function Home() {
 
               <div className="formGroup" style={{ marginBottom: 0 }}>
                 <label style={{ fontSize: '0.9rem', color: 'var(--color-text-secondary)', marginBottom: '0.4rem', fontWeight: 600 }}>Contraseña</label>
-                <input
-                  type="password"
-                  required
-                  placeholder="Ingrese su contraseña..."
-                  value={loginForm.password}
-                  onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })}
-                  style={{ padding: '0.9rem 1rem', borderRadius: '10px', fontSize: '0.95rem', background: '#f8fafc', border: '1px solid #e2e8f0' }}
-                />
+                <div style={{ position: 'relative' }}>
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    required
+                    placeholder="Ingrese su contraseña..."
+                    value={loginForm.password}
+                    onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })}
+                    style={{ padding: '0.9rem 3rem 0.9rem 1rem', borderRadius: '10px', fontSize: '0.95rem', background: '#f8fafc', border: '1px solid #e2e8f0', width: '100%' }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((prev) => !prev)}
+                    aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                    style={{
+                      position: 'absolute',
+                      right: '0.75rem',
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                      border: 'none',
+                      background: 'transparent',
+                      color: '#64748b',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      padding: 0,
+                    }}
+                  >
+                    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
               </div>
 
               {loginError && (
@@ -563,9 +673,48 @@ export default function Home() {
               )}
 
               <button type="submit" className="btn btnPrimary" disabled={isLoggingIn} style={{ padding: '1rem', marginTop: '0.5rem', fontWeight: 'bold', borderRadius: '10px', fontSize: '1rem', transition: 'all 0.2s', boxShadow: '0 4px 14px 0 rgba(79, 70, 229, 0.39)' }}>
-                {isLoggingIn ? 'Verificando credenciales...' : 'Iniciar Sesión'}
+                {isLoggingIn ? 'Ingresando...' : 'Iniciar Sesión'}
               </button>
             </form>
+            
+            {/* Divider */}
+            <div className={styles.dividerCompact} style={{ display: 'flex', alignItems: 'center', gap: '1rem', margin: '1.5rem 0' }}>
+              <div style={{ flex: 1, height: '1px', background: '#e2e8f0' }} />
+              <span style={{ color: '#64748b', fontSize: '0.85rem', fontWeight: 500 }}>o inicia sesión con</span>
+              <div style={{ flex: 1, height: '1px', background: '#e2e8f0' }} />
+            </div>
+            
+            {/* Google Sign In Button */}
+            <button
+              onClick={() => signIn('google')}
+              style={{
+                width: '100%',
+                padding: '0.9rem',
+                borderRadius: '10px',
+                border: '1px solid #e2e8f0',
+                background: 'white',
+                color: '#475569',
+                fontSize: '0.95rem',
+                fontWeight: 600,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '0.75rem',
+                transition: 'all 0.2s',
+              }}
+              onMouseOver={(e) => { e.currentTarget.style.background = '#f8fafc'; }}
+              onMouseOut={(e) => { e.currentTarget.style.background = 'white'; }}
+            >
+              {/* Google G Icon */}
+              <svg width="20" height="20" viewBox="0 0 48 48">
+                <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
+                <path fill="#34A853" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.32 7.09-17.65z" />
+                <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" />
+                <path fill="#4285F4" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
+              </svg>
+              Iniciar sesión con Google
+            </button>
           </div>
         </div>
       </div>
@@ -573,75 +722,525 @@ export default function Home() {
   }
 
   return (
-    <div className="appContainer">
-      {/* Dev Mode Indicator */}
-      <div className="devModeBanner">
-        <span>⚙️ Modo de Base de Datos: <strong>{dbMode}</strong> (Listo para PostgreSQL y Despliegues Vercel/Render)</span>
-      </div>
+    <div style={{ display: 'flex', minHeight: '100vh', backgroundColor: '#f1f5f9', position: 'relative' }}>
+      {/* Mobile overlay */}
+      <div 
+        style={{
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          zIndex: 40,
+          display: (isMobile && isMobileSidebarOpen) ? 'block' : 'none',
+          flexDirection: 'column'
+        }}
+        onClick={() => setIsMobileSidebarOpen(false)}
+      />
 
-      {/* Header Area */}
-      <header className="headerSection" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div className="logoArea">
-          <h1>🏭 Factoría Sánchez</h1>
-          <p>Fabricación metal-mecánica y sistemas de suspensión (Desde 1979)</p>
+      {/* Sidebar */}
+      <aside 
+        style={{
+          width: '260px',
+          background: '#FFFFFF',
+          color: '#1E293B',
+          padding: '1.5rem 1.25rem',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '1.25rem',
+          borderRight: '1px solid #E2E8F0',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+          zIndex: 50,
+          position: isMobile ? 'fixed' : 'relative',
+          left: isMobile ? (isMobileSidebarOpen ? '0' : '-260px') : '0',
+          top: 0,
+          bottom: 0,
+          transition: 'left 0.2s ease, transform 0.2s ease'
+        }}>
+        <div style={{ marginBottom: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.875rem', marginBottom: '0.5rem' }}>
+              <img src="/logo.png" alt="Logo Factoría Sánchez" style={{ height: '40px', width: 'auto', objectFit: 'contain' }} onError={(e) => { 
+                e.currentTarget.style.display = 'none'; 
+                // Fallback to Factory icon if logo not found
+                const fallback = document.createElement('div');
+                fallback.innerHTML = '<div style="width:40px;height:40px;display:flex;align-items:center;justify-content:center;background:#4F46E5;border-radius:8px;color:white;font-size:18px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"></path><path d="M3 7h18"></path><path d="M5 7l1 14"></path><path d="M19 7l-1 14"></path><path d="M8 7l1 14"></path><path d="M16 7l-1 14"></path><path d="M12 3l-1 4"></path><path d="M12 3l1 4"></path><path d="M9 11h6"></path><path d="M9 15h6"></path></svg></div>';
+                e.currentTarget.parentNode?.insertBefore(fallback, e.currentTarget.nextSibling);
+              }} />
+              <h1 style={{ fontSize: '1.125rem', fontWeight: 700, margin: 0, color: '#1E293B' }}>Factoría Sánchez</h1>
+            </div>
+            <p style={{ fontSize: '0.75rem', color: '#64748B', margin: 0, paddingLeft: '3rem' }}>Sistema de Gestión</p>
+          </div>
+          {/* Mobile close button */}
+          <button 
+            onClick={() => setIsMobileSidebarOpen(false)}
+            style={{
+              display: isMobile ? 'flex' : 'none',
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              padding: '0.5rem',
+              color: '#475569'
+            }}
+          >
+            <X size={20} strokeWidth={2} />
+          </button>
         </div>
 
+        <nav style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+          {/* Admin Links */}
+          {currentUser.role === 'ADMIN' && (
+            <>
+              <SidebarButton
+                active={activeTab === 'dashboard'}
+                icon={<LayoutDashboard size={18} strokeWidth={2} />}
+                label="Dashboard"
+                onClick={() => setActiveTab('dashboard')}
+              />
+              <SidebarButton
+                active={activeTab === 'orders'}
+                icon={<ClipboardList size={18} strokeWidth={2} />}
+                label="Órdenes"
+                onClick={() => setActiveTab('orders')}
+              />
+              <SidebarButton
+                active={activeTab === 'inventory'}
+                icon={<PackageOpen size={18} strokeWidth={2} />}
+                label="Inventario Dual"
+                onClick={() => setActiveTab('inventory')}
+              />
+              <SidebarButton
+                active={activeTab === 'reports'}
+                icon={<BarChart3 size={18} strokeWidth={2} />}
+                label="Reportes Técnicos"
+                onClick={() => setActiveTab('reports')}
+              />
+              <SidebarButton
+                active={activeTab === 'users'}
+                icon={<Users size={18} strokeWidth={2} />}
+                label="Usuarios"
+                onClick={() => setActiveTab('users')}
+              />
+            </>
+          )}
+
+          {/* Vendedor Links */}
+          {currentUser.role === 'VENDEDOR' && (
+            <>
+              <SidebarButton
+                active={activeTab === 'orders'}
+                icon={<ClipboardList size={18} strokeWidth={2} />}
+                label="Ver Órdenes"
+                onClick={() => setActiveTab('orders')}
+              />
+              <SidebarButton
+                active={activeTab === 'new_order'}
+                icon={<Plus size={18} strokeWidth={2} />}
+                label="Nueva Cotización"
+                onClick={() => { setActiveTab('new_order'); setFormError(null); setFormSuccess(null); }}
+              />
+            </>
+          )}
+
+          {/* Jefe Taller Links */}
+          {currentUser.role === 'JEFE_TALLER' && (
+            <>
+              <SidebarButton
+                active={activeTab === 'production'}
+                icon={<Factory size={18} strokeWidth={2} />}
+                label="Líneas de Fabricación"
+                onClick={() => setActiveTab('production')}
+              />
+              <SidebarButton
+                active={activeTab === 'inventory'}
+                icon={<PackageOpen size={18} strokeWidth={2} />}
+                label="Stock Insumos"
+                onClick={() => setActiveTab('inventory')}
+              />
+            </>
+          )}
+
+          {/* Almacenero Links */}
+          {currentUser.role === 'ALMACENERO' && (
+            <>
+              <SidebarButton
+                active={activeTab === 'inventory'}
+                icon={<PackageOpen size={18} strokeWidth={2} />}
+                label="Inventario Dual"
+                onClick={() => setActiveTab('inventory')}
+              />
+              <SidebarButton
+                active={activeTab === 'kardex'}
+                icon={<ListOrdered size={18} strokeWidth={2} />}
+                label="Kardex de Movimientos"
+                onClick={() => setActiveTab('kardex')}
+              />
+              <SidebarButton
+                active={activeTab === 'restock'}
+                icon={<ShoppingCart size={18} strokeWidth={2} />}
+                label="Ingresar Compra"
+                onClick={() => { setActiveTab('restock'); setFormError(null); setFormSuccess(null); }}
+              />
+            </>
+          )}
+        </nav>
+
         {/* User Info & Logout */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-          <div style={{ textAlign: 'right' }}>
-            <p style={{ margin: 0, fontWeight: 'bold', color: 'var(--color-text-primary)' }}>{currentUser.name}</p>
-            <span className="badge" style={{ background: 'rgba(99,102,241,0.2)', color: 'var(--color-primary)' }}>{currentUser.role}</span>
+        <div style={{ marginTop: 'auto', paddingTop: '1.25rem', borderTop: '1px solid #E2E8F0' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.875rem', marginBottom: '1rem' }}>
+            <div style={{
+              width: '40px',
+              height: '40px',
+              borderRadius: '10px',
+              background: 'linear-gradient(135deg, #4F46E5 0%, #2563EB 100%)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontWeight: 700,
+              fontSize: '0.95rem',
+              color: '#FFFFFF'
+            }}>
+              {currentUser.name.charAt(0)}
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <p style={{ margin: 0, fontSize: '0.875rem', fontWeight: 600, color: '#1E293B', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{currentUser.name}</p>
+              <span style={{ fontSize: '0.725rem', color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.025em', fontWeight: 500 }}>{currentUser.role}</span>
+            </div>
           </div>
-          <button className="btn btnSecondary" onClick={handleLogout} style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }}>
+          <button
+            onClick={handleLogout}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.75rem',
+              width: '100%',
+              padding: '0.7rem 0.875rem',
+              borderRadius: '10px',
+              background: '#FEE2E2',
+              color: '#DC2626',
+              border: '1px solid #FECACA',
+              fontSize: '0.825rem',
+              fontWeight: 600,
+              cursor: 'pointer',
+              transition: 'all 0.2s ease'
+            }}
+            onMouseOver={(e) => {
+              e.currentTarget.style.background = '#FECACA';
+              e.currentTarget.style.color = '#B91C1C';
+            }}
+            onMouseOut={(e) => {
+              e.currentTarget.style.background = '#FEE2E2';
+              e.currentTarget.style.color = '#DC2626';
+            }}
+          >
+            <LogOut size={18} strokeWidth={2} />
             Cerrar Sesión
           </button>
         </div>
-      </header>
+      </aside>
 
-      {/* Main Grid View */}
-      <main>
-        {/* Navigation Tabs based on role */}
-        <div className="roleSelectorBar" style={{ marginBottom: '1.5rem', width: 'fit-content' }}>
-          {currentUser.role === 'ADMIN' && (
-            <>
-              <button className={`roleBtn ${activeTab === 'orders' ? 'roleBtnActive' : ''}`} onClick={() => setActiveTab('orders')}>Órdenes</button>
-              <button className={`roleBtn ${activeTab === 'inventory' ? 'roleBtnActive' : ''}`} onClick={() => setActiveTab('inventory')}>Inventario Dual</button>
-              <button className={`roleBtn ${activeTab === 'reports' ? 'roleBtnActive' : ''}`} onClick={() => setActiveTab('reports')}>Reportes Técnicos</button>
-            </>
-          )}
-
-          {currentUser.role === 'VENDEDOR' && (
-            <>
-              <button className={`roleBtn ${activeTab === 'orders' ? 'roleBtnActive' : ''}`} onClick={() => setActiveTab('orders')}>Ver Órdenes</button>
-              <button className={`roleBtn ${activeTab === 'new_order' ? 'roleBtnActive' : ''}`} onClick={() => { setActiveTab('new_order'); setFormError(null); setFormSuccess(null); }}>Nueva Cotización</button>
-            </>
-          )}
-
-          {currentUser.role === 'JEFE_TALLER' && (
-            <>
-              <button className={`roleBtn ${activeTab === 'production' ? 'roleBtnActive' : ''}`} onClick={() => setActiveTab('production')}>Líneas de Producción</button>
-              <button className={`roleBtn ${activeTab === 'inventory' ? 'roleBtnActive' : ''}`} onClick={() => setActiveTab('inventory')}>Stock Insumos</button>
-            </>
-          )}
-
-          {currentUser.role === 'ALMACENERO' && (
-            <>
-              <button className={`roleBtn ${activeTab === 'inventory' ? 'roleBtnActive' : ''}`} onClick={() => setActiveTab('inventory')}>Inventario Dual</button>
-              <button className={`roleBtn ${activeTab === 'kardex' ? 'roleBtnActive' : ''}`} onClick={() => setActiveTab('kardex')}>Kardex de Movimientos</button>
-              <button className={`roleBtn ${activeTab === 'restock' ? 'roleBtnActive' : ''}`} onClick={() => { setActiveTab('restock'); setFormError(null); setFormSuccess(null); }}>Ingresar Compra</button>
-            </>
-          )}
+      {/* Main Content */}
+      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#F8FAFC', overflow: 'hidden' }}>
+        {/* Top bar with hamburger menu */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          padding: '1rem 2rem',
+          background: '#FFFFFF',
+          borderBottom: '1px solid #E2E8F0',
+          gap: '1rem'
+        }}>
+          <button
+            onClick={() => setIsMobileSidebarOpen(true)}
+            style={{
+              display: isMobile ? 'flex' : 'none',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: 'none',
+              border: '1px solid #E2E8F0',
+              borderRadius: '8px',
+              padding: '0.5rem',
+              cursor: 'pointer',
+              color: '#475569'
+            }}
+          >
+            <Menu size={20} strokeWidth={2} />
+          </button>
+          {/* Mobile logo and name in top bar */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <img src="/logo.png" alt="Logo Factoría Sánchez" style={{ height: '32px', width: 'auto', objectFit: 'contain' }} onError={(e) => { e.currentTarget.style.display = 'none'; }} />
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <h2 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700, color: '#1E293B' }}>Factoría Sánchez</h2>
+              <span style={{ fontSize: '0.75rem', color: '#64748B' }}>Sistema de Gestión</span>
+            </div>
+          </div>
         </div>
+        
+        {/* Content Area */}
+        <div style={{ flex: 1, padding: '2rem', overflow: 'auto' }}>
+          {/* Header Area */}
+          <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
+            <div>
+              <h2 style={{ margin: 0, fontSize: '1.75rem', color: '#1e293b' }}>
+                {activeTab === 'dashboard' && 'Dashboard'}
+                {activeTab === 'orders' && 'Órdenes'}
+                {activeTab === 'inventory' && 'Inventario Dual'}
+                {activeTab === 'reports' && 'Reportes Técnicos'}
+                {activeTab === 'users' && 'Usuarios'}
+                {activeTab === 'new_order' && 'Nueva Cotización'}
+                {activeTab === 'production' && 'Líneas de Fabricación'}
+                {activeTab === 'kardex' && 'Kardex de Movimientos'}
+                {activeTab === 'restock' && 'Ingresar Compra'}
+              </h2>
+              <p style={{ margin: '0.5rem 0 0', color: '#64748b', fontSize: '0.95rem' }}>
+                Bienvenido al sistema de gestión de Factoría Sánchez
+              </p>
+            </div>
+          </header>
 
         {/* Global Notifications */}
         {formError && (
-          <div className="alertBanner">
-            <span>⚠️ <strong>Error de negocio:</strong> {formError}</span>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.75rem',
+            padding: '0.875rem 1rem',
+            background: '#fef2f2',
+            border: '1px solid #fecaca',
+            borderRadius: '8px',
+            fontSize: '0.8rem',
+            marginBottom: '1.25rem'
+          }}>
+            <AlertCircle size={18} style={{ color: '#dc2626', flexShrink: 0 }} />
+            <span style={{ color: '#991b1b', fontWeight: 500 }}><strong>Error:</strong> {formError}</span>
           </div>
         )}
         {formSuccess && (
-          <div className="alertBanner alertBannerInfo">
-            <span>🎉 <strong>Éxito:</strong> {formSuccess}</span>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.75rem',
+            padding: '0.875rem 1rem',
+            background: '#f0fdf4',
+            border: '1px solid #bbf7d0',
+            borderRadius: '8px',
+            fontSize: '0.8rem',
+            marginBottom: '1.25rem'
+          }}>
+            <CheckCircle2 size={18} style={{ color: '#16a34a', flexShrink: 0 }} />
+            <span style={{ color: '#166534', fontWeight: 500 }}><strong>Éxito:</strong> {formSuccess}</span>
+          </div>
+        )}
+
+        {/* ----------------------------------------------------
+            TAB: DASHBOARD (Admin View)
+            ---------------------------------------------------- */}
+        {activeTab === 'dashboard' && (
+          <div>
+            {/* Stats Cards */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
+              <div style={{ 
+                background: '#FFFFFF', 
+                padding: '1.125rem 1.25rem', 
+                borderRadius: '10px', 
+                boxShadow: '0 1px 3px rgba(0,0,0,0.05), 0 1px 2px rgba(0,0,0,0.05)',
+                border: '1px solid #E2E8F0'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                  <span style={{ fontSize: '0.75rem', color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.025em', fontWeight: 500 }}>Órdenes Totales</span>
+                  <div style={{ 
+                    background: 'rgba(79,70,229,0.1)', 
+                    padding: '0.5rem', 
+                    borderRadius: '8px' 
+                  }}>
+                    <ClipboardList size={18} style={{ color: '#4F46E5' }} />
+                  </div>
+                </div>
+                <p style={{ fontSize: '1.75rem', fontWeight: 700, color: '#1E293B', margin: 0, lineHeight: 1 }}>{orders.length}</p>
+              </div>
+
+              <div style={{ 
+                background: '#FFFFFF', 
+                padding: '1.125rem 1.25rem', 
+                borderRadius: '10px', 
+                boxShadow: '0 1px 3px rgba(0,0,0,0.05), 0 1px 2px rgba(0,0,0,0.05)',
+                border: '1px solid #E2E8F0'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                  <span style={{ fontSize: '0.75rem', color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.025em', fontWeight: 500 }}>Ordenes Pendientes</span>
+                  <div style={{ 
+                    background: 'rgba(251,191,36,0.1)', 
+                    padding: '0.5rem', 
+                    borderRadius: '8px' 
+                  }}>
+                    <AlertCircle size={18} style={{ color: '#F59E0B' }} />
+                  </div>
+                </div>
+                <p style={{ fontSize: '1.75rem', fontWeight: 700, color: '#1E293B', margin: 0, lineHeight: 1 }}>{orders.filter(o => o.estado === 'PENDIENTE_PAGO').length}</p>
+              </div>
+
+              <div style={{ 
+                background: '#FFFFFF', 
+                padding: '1.125rem 1.25rem', 
+                borderRadius: '10px', 
+                boxShadow: '0 1px 3px rgba(0,0,0,0.05), 0 1px 2px rgba(0,0,0,0.05)',
+                border: '1px solid #E2E8F0'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                  <span style={{ fontSize: '0.75rem', color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.025em', fontWeight: 500 }}>Productos en Inventario</span>
+                  <div style={{ 
+                    background: 'rgba(16,185,129,0.1)', 
+                    padding: '0.5rem', 
+                    borderRadius: '8px' 
+                  }}>
+                    <PackageOpen size={18} style={{ color: '#10B981' }} />
+                  </div>
+                </div>
+                <p style={{ fontSize: '1.75rem', fontWeight: 700, color: '#1E293B', margin: 0, lineHeight: 1 }}>{materials.length}</p>
+              </div>
+
+              <div style={{ 
+                background: '#FFFFFF', 
+                padding: '1.125rem 1.25rem', 
+                borderRadius: '10px', 
+                boxShadow: '0 1px 3px rgba(0,0,0,0.05), 0 1px 2px rgba(0,0,0,0.05)',
+                border: '1px solid #E2E8F0'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                  <span style={{ fontSize: '0.75rem', color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.025em', fontWeight: 500 }}>Usuarios Activos</span>
+                  <div style={{ 
+                    background: 'rgba(79,70,229,0.1)', 
+                    padding: '0.5rem', 
+                    borderRadius: '8px' 
+                  }}>
+                    <Users size={18} style={{ color: '#4F46E5' }} />
+                  </div>
+                </div>
+                <p style={{ fontSize: '1.75rem', fontWeight: 700, color: '#1E293B', margin: 0, lineHeight: 1 }}>{users.length}</p>
+              </div>
+            </div>
+
+            {/* Recent Orders */}
+            <div style={{ 
+              background: '#FFFFFF', 
+              padding: '1.25rem', 
+              borderRadius: '10px', 
+              boxShadow: '0 1px 3px rgba(0,0,0,0.05), 0 1px 2px rgba(0,0,0,0.05)',
+              border: '1px solid #E2E8F0'
+            }}>
+              <h3 style={{ margin: '0 0 1rem', fontSize: '0.95rem', fontWeight: 600, color: '#1E293B' }}>Órdenes Recientes</h3>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid #E2E8F0' }}>
+                      <th style={{ textAlign: 'left', padding: '0.625rem 0.75rem', color: '#64748B', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.025em', fontWeight: 600 }}>Código</th>
+                      <th style={{ textAlign: 'left', padding: '0.625rem 0.75rem', color: '#64748B', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.025em', fontWeight: 600 }}>Cliente</th>
+                      <th style={{ textAlign: 'left', padding: '0.625rem 0.75rem', color: '#64748B', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.025em', fontWeight: 600 }}>Estado</th>
+                      <th style={{ textAlign: 'left', padding: '0.625rem 0.75rem', color: '#64748B', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.025em', fontWeight: 600 }}>Monto</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {orders.slice(0, 5).map((order) => (
+                      <tr key={order.id} style={{ borderBottom: '1px solid #F1F5F9', transition: 'background 0.15s' }}>
+                        <td style={{ padding: '0.625rem 0.75rem', fontWeight: 600, color: '#1E293B', fontSize: '0.85rem' }}>Orden {order.codigoCorrelativoUnico}</td>
+                        <td style={{ padding: '0.625rem 0.75rem', color: '#475569', fontSize: '0.85rem' }}>{order.clienteNombre}</td>
+                        <td style={{ padding: '0.625rem 0.75rem' }}>
+                          <span style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.375rem',
+                            padding: '0.25rem 0.625rem',
+                            borderRadius: '9999px',
+                            fontSize: '0.7rem',
+                            fontWeight: 600,
+                            background: order.estado === 'APROBADA' ? '#DCFCE7' : 
+                                       order.estado === 'TERMINADA' ? '#E0F2FE' :
+                                       order.estado === 'ENTREGADA' ? '#FEF3C7' : '#FEE2E2',
+                            color: order.estado === 'APROBADA' ? '#16A34A' :
+                                       order.estado === 'TERMINADA' ? '#0369A1' :
+                                       order.estado === 'ENTREGADA' ? '#B45309' : '#DC2626'
+                          }}>
+                            {order.estado === 'PENDIENTE_PAGO' && <AlertCircle size={12} />}
+                            {order.estado === 'APROBADA' && <CheckCircle2 size={12} />}
+                            {order.estado === 'TERMINADA' && <CheckCircle2 size={12} />}
+                            {order.estado === 'ENTREGADA' && <Truck size={12} />}
+                            {order.estado === 'CANCELADA' && <XCircle size={12} />}
+                            {order.estado}
+                          </span>
+                        </td>
+                        <td style={{ padding: '0.625rem 0.75rem', color: '#1E293B', fontWeight: 600, fontSize: '0.85rem' }}>S/. {order.montoTotal}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ----------------------------------------------------
+            TAB: USUARIOS (Admin View)
+            ---------------------------------------------------- */}
+        {activeTab === 'users' && (
+          <div style={{ 
+            background: '#FFFFFF', 
+            padding: '1.25rem', 
+            borderRadius: '10px', 
+            boxShadow: '0 1px 3px rgba(0,0,0,0.05), 0 1px 2px rgba(0,0,0,0.05)',
+            border: '1px solid #E2E8F0'
+          }}>
+            <h3 style={{ margin: '0 0 1rem', fontSize: '0.95rem', fontWeight: 600, color: '#1E293B' }}>Lista de Usuarios</h3>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '1rem' }}>
+              {users.map((user) => (
+                <div key={user.email} style={{
+                  padding: '1rem',
+                  border: '1px solid #E2E8F0',
+                  borderRadius: '10px',
+                  background: '#FAFAFA',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '0.5rem'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.875rem', marginBottom: '0.25rem' }}>
+                    <div style={{
+                      width: '40px',
+                      height: '40px',
+                      borderRadius: '10px',
+                      background: 'linear-gradient(135deg, #4F46E5 0%, #2563EB 100%)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#FFFFFF',
+                      fontSize: '0.95rem',
+                      fontWeight: 700
+                    }}>
+                      {user.name.charAt(0)}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p style={{ margin: 0, fontSize: '0.875rem', fontWeight: 600, color: '#1E293B', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{user.name}</p>
+                      <span style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        padding: '0.15rem 0.5rem',
+                        borderRadius: '6px',
+                        fontSize: '0.65rem',
+                        fontWeight: 600,
+                        background: 'rgba(79,70,229,0.1)',
+                        color: '#4F46E5',
+                        marginTop: '0.2rem'
+                      }}>
+                        {user.role}
+                      </span>
+                    </div>
+                  </div>
+                  <p style={{ margin: 0, fontSize: '0.775rem', color: '#64748B', display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
+                    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <rect width="20" height="16" x="2" y="4" rx="2"/>
+                      <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>
+                    </svg>
+                    {user.email}
+                  </p>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
@@ -1600,6 +2199,7 @@ export default function Home() {
             </div>
           </div>
         )}
+        </div> {/* Close content area div */}
       </main>
     </div>
   );

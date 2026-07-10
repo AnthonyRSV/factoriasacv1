@@ -44,7 +44,20 @@ DATABASE_URL="postgresql://postgres:postgres@localhost:5432/metal_db?schema=publ
 
 # Clave secreta para tokens de autenticación
 JWT_SECRET="factoriasac_secret_key"
+
+# OAuth de Google para NextAuth
+GOOGLE_CLIENT_ID="tu_client_id.apps.googleusercontent.com"
+GOOGLE_CLIENT_SECRET="tu_client_secret"
+NEXTAUTH_URL="http://localhost:3000"
 ```
+
+### 3.1. Configurar Google OAuth
+En Google Cloud Console, agrega exactamente estos valores para el cliente OAuth web del proyecto:
+
+* **Orígenes autorizados de JavaScript**: `http://localhost:3000`
+* **URIs de redireccionamiento autorizados**: `http://localhost:3000/api/auth/callback/google`
+
+Si usas otro host o puerto, reemplázalo también aquí y en `NEXTAUTH_URL`. El error `redirect_uri_mismatch` aparece cuando la URL que devuelve NextAuth no coincide con una URI autorizada en Google.
 
 ### 4. Generar el Cliente de Prisma
 Compila el ORM de base de datos para generar los tipos estáticos de TypeScript:

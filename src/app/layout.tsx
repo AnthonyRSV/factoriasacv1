@@ -1,5 +1,6 @@
 import './globals.css';
 import type { Metadata } from 'next';
+import { Providers } from './providers';
 
 export const metadata: Metadata = {
   title: 'Metal System - Control de Producción e Inventario',
@@ -14,7 +15,7 @@ export default function RootLayout({
   return (
     <html lang="es">
       <body>
-        {children}
+        <Providers>{children}</Providers>
       </body>
     </html>
   );

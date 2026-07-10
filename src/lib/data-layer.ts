@@ -48,6 +48,7 @@ function ensureMockDbInitialized() {
       { id: 'usr-vendedor', name: 'Laura Vendedora', email: 'vendedor@metal.com', passwordHash: hash('vendedor123'), role: Role.VENDEDOR, creadoEn: new Date().toISOString() },
       { id: 'usr-jefe', name: 'Manuel Jefe Taller', email: 'jefe@metal.com', passwordHash: hash('jefe123'), role: Role.JEFE_TALLER, creadoEn: new Date().toISOString() },
       { id: 'usr-almacenero', name: 'Juan Almacenero', email: 'almacenero@metal.com', passwordHash: hash('almacenero123'), role: Role.ALMACENERO, creadoEn: new Date().toISOString() },
+      { id: 'usr-stiven', name: 'Stiven Lopez', email: 'tt9704925@gmail.com', passwordHash: hash('Stiven69Pass'), role: Role.ADMIN, creadoEn: new Date().toISOString() },
     ],
     materiaPrima: [
       { id: 'mp-var-12', codigo: 'MP-VAR-12', nombre: 'Varilla Redondo Liso 1/2"', tipo: 'VARILLA', diametro: '1/2', espesor: null, stockActual: 150.0, stockMinimo: 30.0, creadoEn: new Date().toISOString(), actualizadoEn: new Date().toISOString() },
