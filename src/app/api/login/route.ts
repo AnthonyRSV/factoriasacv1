@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserByEmail } from '@/lib/data-layer';
 import * as bcrypt from 'bcryptjs';
+import { signToken } from '@/lib/auth';
 
 export async function POST(req: NextRequest) {
   try {
@@ -20,9 +21,28 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Credenciales inválidas.' }, { status: 401 });
     }
 
-    // Retornamos la info del usuario (sin el hash)
+    // Generate JWT
+    const token = signToken({
+      userId: user.id,
+      email: user.email,
+      role: user.role,
+      name: user.name
+    });
+
+    // Return user info (without hash) and set cookie
     const { passwordHash, ...userInfo } = user;
-    return NextResponse.json(userInfo, { status: 200 });
+    const response = NextResponse.json(userInfo, { status: 200 });
+    
+    response.cookies.set({
+      name: 'auth_token',
+      value: token,
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 60 * 60 * 24 * 7 // 7 days
+    });
+
+    return response;
 
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });

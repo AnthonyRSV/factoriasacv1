@@ -103,7 +103,7 @@ export default function Home() {
   };
 
 
-  const getHeaders = useCallback(() => {
+  const getHeaders = useCallback((): Record<string, string> => {
     if (!currentUser) return { 'Content-Type': 'application/json' };
     return {
       'Content-Type': 'application/json',
