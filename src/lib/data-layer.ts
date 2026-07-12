@@ -205,6 +205,16 @@ export async function getUserByEmail(email: string) {
   }
 }
 
+export async function getUsers() {
+  const isPg = await checkDbMode();
+  if (isPg) {
+    return await prisma.user.findMany();
+  } else {
+    const db = readMockDb();
+    return db.users;
+  }
+}
+
 export async function getMaterials() {
   const isPg = await checkDbMode();
   if (isPg) {

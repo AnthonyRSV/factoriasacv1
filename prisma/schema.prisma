@@ -1,10 +1,181 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
-generator client {
-  provider = "prisma-client-js"
+model User {
+  id                String             @id @default(uuid())
+  name              String
+  email             String             @unique
+  passwordHash      String?
+  role              Role
+  creadoEn          DateTime           @default(now())
+  emailVerified     DateTime?
+  image             String?
+  accounts          Account[]
+  kardexComercial   KardexComercial[]
+  kardexMovimientos KardexInventario[]
+  autorizaciones    SalidaAutorizada[]
+  sessions          Session[]
+}
+
+model Account {
+  id                String  @id @default(uuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(uuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model MateriaPrima {
+  id                String                  @id @default(uuid())
+  codigo            String                  @unique
+  nombre            String
+  tipo              TipoMateriaPrima
+  diametro          String?
+  espesor           String?
+  stockActual       Float                   @default(0)
+  stockMinimo       Float                   @default(0)
+  creadoEn          DateTime                @default(now())
+  actualizadoEn     DateTime                @updatedAt
+  kardexMovimientos KardexInventario[]
+  fichasTecnicas    ProductosFichaTecnica[]
+}
+
+model ProductosFichaTecnica {
+  id             String         @id @default(uuid())
+  codigo         String         @unique
+  nombre         String
+  formulaCalculo String
+  materiaPrimaId String
+  detallesOrden  DetalleOrden[]
+  materiaPrima   MateriaPrima   @relation(fields: [materiaPrimaId], references: [id])
+}
+
+model OrdenesFabricacion {
+  id                     String            @id @default(uuid())
+  codigoCorrelativoUnico Int               @unique @default(autoincrement())
+  clienteNombre          String
+  tipoCliente            TipoCliente
+  estado                 EstadoOrden       @default(PENDIENTE_PAGO)
+  fechaComprometida      DateTime
+  montoTotal             Float
+  montoAbonado           Float
+  metodoPago             String
+  esUrgente              Boolean           @default(false)
+  cargoUrgencia          Float             @default(0)
+  tokenConsulta          String            @unique @default(uuid())
+  creadoEn               DateTime          @default(now())
+  actualizadoEn          DateTime          @updatedAt
+  detalles               DetalleOrden[]
+  procesos               ProcesoEtapa[]
+  salidaAutorizada       SalidaAutorizada?
+}
+
+model DetalleOrden {
+  id                  String                 @id @default(uuid())
+  ordenId             String
+  productoId          String?
+  productoComercialId String?
+  largo               Float
+  ancho               Float
+  espesor             Float
+  forma               String
+  calidadAcero        String
+  colorPintura        String?
+  tuercasTipo         String?
+  cantidadSolicitada  Int
+  orden               OrdenesFabricacion     @relation(fields: [ordenId], references: [id], onDelete: Cascade)
+  productoComercial   ProductoComercial?     @relation(fields: [productoComercialId], references: [id])
+  producto            ProductosFichaTecnica? @relation(fields: [productoId], references: [id])
+}
+
+model ProcesoEtapa {
+  id               String             @id @default(uuid())
+  ordenId          String
+  etapaNombre      String
+  ordenSecuencia   Int
+  completada       Boolean            @default(false)
+  operarioAsignado String?
+  fechaCompletada  DateTime?
+  orden            OrdenesFabricacion @relation(fields: [ordenId], references: [id], onDelete: Cascade)
+}
+
+model KardexInventario {
+  id             String         @id @default(uuid())
+  materiaPrimaId String
+  tipoMovimiento TipoMovimiento
+  cantidad       Float
+  motivo         String
+  usuarioId      String
+  creadoEn       DateTime       @default(now())
+  materiaPrima   MateriaPrima   @relation(fields: [materiaPrimaId], references: [id])
+  usuario        User           @relation(fields: [usuarioId], references: [id])
+}
+
+model SalidaAutorizada {
+  id           String             @id @default(uuid())
+  ordenId      String             @unique
+  jefeTallerId String
+  autorizadoEn DateTime           @default(now())
+  jefeTaller   User               @relation(fields: [jefeTallerId], references: [id])
+  orden        OrdenesFabricacion @relation(fields: [ordenId], references: [id], onDelete: Cascade)
+}
+
+model ProductoComercial {
+  id                String            @id @default(uuid())
+  codigo            String            @unique
+  nombre            String
+  descripcion       String?
+  precioVenta       Float?
+  stockActual       Float             @default(0)
+  stockMinimo       Float             @default(0)
+  creadoEn          DateTime          @default(now())
+  actualizadoEn     DateTime          @updatedAt
+  detallesOrden     DetalleOrden[]
+  kardexMovimientos KardexComercial[]
+}
+
+model KardexComercial {
+  id                  String            @id @default(uuid())
+  productoComercialId String
+  tipoMovimiento      TipoMovimiento
+  cantidad            Float
+  motivo              String
+  usuarioId           String
+  creadoEn            DateTime          @default(now())
+  productoComercial   ProductoComercial @relation(fields: [productoComercialId], references: [id])
+  usuario             User              @relation(fields: [usuarioId], references: [id])
 }
 
 enum Role {
@@ -38,188 +209,4 @@ enum TipoMateriaPrima {
   MUELLE
   TUERCA
   ARANDELA
-}
-
-model User {
-  id           String   @id @default(uuid())
-  name         String
-  email        String   @unique
-  passwordHash String? // Make optional for Google auth users
-  role         Role
-  creadoEn     DateTime @default(now())
-  emailVerified DateTime? // For NextAuth
-  image        String? // Google profile picture
-
-  // NextAuth relations
-  accounts      Account[]
-  sessions      Session[]
-  
-  // Relations
-  kardexMovimientos KardexInventario[]
-  kardexComercial   KardexComercial[]
-  autorizaciones    SalidaAutorizada[]
-}
-
-model Account {
-  id                String  @id @default(uuid())
-  userId            String
-  type              String
-  provider          String
-  providerAccountId String
-  refresh_token     String? @db.Text
-  access_token      String? @db.Text
-  expires_at        Int?
-  token_type        String?
-  scope             String?
-  id_token          String? @db.Text
-  session_state     String?
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([provider, providerAccountId])
-}
-
-model Session {
-  id           String   @id @default(uuid())
-  sessionToken String   @unique
-  userId       String
-  expires      DateTime
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-}
-
-model VerificationToken {
-  identifier String
-  token      String   @unique
-  expires    DateTime
-
-  @@unique([identifier, token])
-}
-
-model MateriaPrima {
-  id            String           @id @default(uuid())
-  codigo        String           @unique
-  nombre        String
-  tipo          TipoMateriaPrima
-  diametro      String?          // e.g., "5/8", "3/4", "7/8", "1/2", "1", "1 1/4"
-  espesor       String?          // e.g., "3/8"
-  stockActual   Float            @default(0)
-  stockMinimo   Float            @default(0)
-  creadoEn      DateTime         @default(now())
-  actualizadoEn DateTime         @updatedAt
-
-  // Relations
-  kardexMovimientos KardexInventario[]
-  fichasTecnicas    ProductosFichaTecnica[]
-}
-
-model ProductosFichaTecnica {
-  id             String       @id @default(uuid())
-  codigo         String       @unique
-  nombre         String
-  formulaCalculo String       // Custom JSON formula instructions or logic string
-  materiaPrimaId String
-  materiaPrima   MateriaPrima @relation(fields: [materiaPrimaId], references: [id])
-
-  // Relations
-  detallesOrden  DetalleOrden[]
-}
-
-model OrdenesFabricacion {
-  id                      String            @id @default(uuid())
-  codigoCorrelativoUnico  Int               @unique @default(autoincrement()) // Generates serial sequence in Postgres
-  clienteNombre           String
-  tipoCliente             TipoCliente
-  estado                  EstadoOrden       @default(PENDIENTE_PAGO)
-  fechaComprometida       DateTime
-  montoTotal              Float
-  montoAbonado            Float
-  metodoPago              String            // e.g., "EFECTIVO", "TRANSFERENCIA_BANCARIA"
-  esUrgente               Boolean           @default(false)
-  cargoUrgencia           Float             @default(0)
-  tokenConsulta           String            @unique @default(uuid()) // Secure external view link
-  creadoEn                DateTime          @default(now())
-  actualizadoEn           DateTime          @updatedAt
-
-  // Relations
-  detalles               DetalleOrden[]
-  procesos               ProcesoEtapa[]
-  salidaAutorizada       SalidaAutorizada?
-}
-
-model DetalleOrden {
-  id                 String                @id @default(uuid())
-  ordenId            String
-  orden              OrdenesFabricacion    @relation(fields: [ordenId], references: [id], onDelete: Cascade)
-  productoId         String?
-  producto           ProductosFichaTecnica? @relation(fields: [productoId], references: [id])
-  productoComercialId String?
-  productoComercial   ProductoComercial?    @relation(fields: [productoComercialId], references: [id])
-  largo              Float                 // length in meters
-  ancho              Float                 // width in meters
-  espesor            Float                 // thickness in inches or mm
-  forma              String                // e.g., "Circular", "Rectangular"
-  calidadAcero       String                // e.g., "A36", "1045", "BCL"
-  colorPintura       String?
-  tuercasTipo        String?
-  cantidadSolicitada Int
-}
-
-model ProcesoEtapa {
-  id             String             @id @default(uuid())
-  ordenId        String
-  orden          OrdenesFabricacion @relation(fields: [ordenId], references: [id], onDelete: Cascade)
-  etapaNombre    String             // e.g., "Corte", "Roscado", "Doblado", "Pintura"
-  ordenSecuencia Int
-  completada     Boolean            @default(false)
-  operarioAsignado String?
-  fechaCompletada DateTime?
-}
-
-model KardexInventario {
-  id             String         @id @default(uuid())
-  materiaPrimaId String
-  materiaPrima   MateriaPrima   @relation(fields: [materiaPrimaId], references: [id])
-  tipoMovimiento TipoMovimiento
-  cantidad       Float
-  motivo         String
-  usuarioId      String
-  usuario        User           @relation(fields: [usuarioId], references: [id])
-  creadoEn       DateTime       @default(now())
-}
-
-model SalidaAutorizada {
-  id             String             @id @default(uuid())
-  ordenId        String             @unique
-  orden          OrdenesFabricacion @relation(fields: [ordenId], references: [id], onDelete: Cascade)
-  jefeTallerId   String
-  jefeTaller     User               @relation(fields: [jefeTallerId], references: [id])
-  autorizadoEn   DateTime           @default(now())
-}
-
-model ProductoComercial {
-  id            String            @id @default(uuid())
-  codigo        String            @unique
-  nombre        String
-  descripcion   String?
-  precioVenta   Float?
-  stockActual   Float             @default(0)
-  stockMinimo   Float             @default(0)
-  creadoEn      DateTime          @default(now())
-  actualizadoEn DateTime          @updatedAt
-
-  // Relations
-  kardexMovimientos KardexComercial[]
-  detallesOrden     DetalleOrden[]
-}
-
-model KardexComercial {
-  id                  String            @id @default(uuid())
-  productoComercialId String
-  productoComercial   ProductoComercial @relation(fields: [productoComercialId], references: [id])
-  tipoMovimiento      TipoMovimiento
-  cantidad            Float
-  motivo              String
-  usuarioId           String
-  usuario             User              @relation(fields: [usuarioId], references: [id])
-  creadoEn            DateTime          @default(now())
 }
