@@ -23,7 +23,10 @@ import {
   X,
   Eye,
   EyeOff,
+  Calendar,
 } from 'lucide-react';
+import CalendarioProduccion from './components/CalendarioProduccion';
+import SeguimientoOrdenes from './components/SeguimientoOrdenes';
 
 // Sidebar Button Component
 const SidebarButton = ({ active, icon, label, onClick }: { active: boolean, icon: React.ReactNode, label: string, onClick: () => void }) => {
@@ -138,6 +141,9 @@ export default function Home() {
 
   // Active Tab Selection
   const [activeTab, setActiveTab] = useState<string>('orders');
+  
+  // Production Module Internal Tab Selection
+  const [productionActiveTab, setProductionActiveTab] = useState<'calendario' | 'seguimiento'>('calendario');
 
   // Modals & Detail Simulation State
   const [selectedOrder, setSelectedOrder] = useState<any>(null);
@@ -819,6 +825,12 @@ export default function Home() {
                 label="Usuarios"
                 onClick={() => setActiveTab('users')}
               />
+              <SidebarButton
+                active={activeTab === 'produccion'}
+                icon={<Calendar size={18} strokeWidth={2} />}
+                label="Producción"
+                onClick={() => setActiveTab('produccion')}
+              />
             </>
           )}
 
@@ -854,6 +866,12 @@ export default function Home() {
                 icon={<PackageOpen size={18} strokeWidth={2} />}
                 label="Stock Insumos"
                 onClick={() => setActiveTab('inventory')}
+              />
+              <SidebarButton
+                active={activeTab === 'produccion'}
+                icon={<Calendar size={18} strokeWidth={2} />}
+                label="Producción"
+                onClick={() => setActiveTab('produccion')}
               />
             </>
           )}
@@ -987,6 +1005,7 @@ export default function Home() {
                 {activeTab === 'users' && 'Usuarios'}
                 {activeTab === 'new_order' && 'Nueva Cotización'}
                 {activeTab === 'production' && 'Líneas de Fabricación'}
+                {activeTab === 'produccion' && 'Producción y Seguimiento de Fabricación'}
                 {activeTab === 'kardex' && 'Kardex de Movimientos'}
                 {activeTab === 'restock' && 'Ingresar Compra'}
               </h2>
@@ -1972,6 +1991,37 @@ export default function Home() {
                 </div>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* ----------------------------------------------------
+            TAB: PRODUCCIÓN (Admin & Jefe Taller view)
+            ---------------------------------------------------- */}
+        {activeTab === 'produccion' && (
+          <div className="tabContent">
+            {/* Internal Tabs for Production Module */}
+            <div className="roleSelectorBar" style={{ marginBottom: '2rem' }}>
+              <button
+                onClick={() => setProductionActiveTab('calendario')}
+                className={`roleBtn ${productionActiveTab === 'calendario' ? 'roleBtnActive' : ''}`}
+              >
+                <Calendar size={18} strokeWidth={2} style={{ marginRight: '0.5rem' }} />
+                Calendario de Producción
+              </button>
+              <button
+                onClick={() => setProductionActiveTab('seguimiento')}
+                className={`roleBtn ${productionActiveTab === 'seguimiento' ? 'roleBtnActive' : ''}`}
+              >
+                <ListOrdered size={18} strokeWidth={2} style={{ marginRight: '0.5rem' }} />
+                Seguimiento de Órdenes
+              </button>
+            </div>
+
+            {productionActiveTab === 'calendario' ? (
+              <CalendarioProduccion />
+            ) : (
+              <SeguimientoOrdenes />
+            )}
           </div>
         )}
 

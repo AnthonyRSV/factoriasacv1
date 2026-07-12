@@ -54,7 +54,7 @@ export async function POST(req: NextRequest) {
     if (!authResult.authorized) return authResult.errorResponse!;
 
     const body = await req.json();
-    const { clienteNombre, tipoCliente, fechaComprometida, montoTotal, montoAbonado, metodoPago, esUrgente, detalles } = body;
+    const { clienteNombre, tipoCliente, fechaComprometida, fechaProduccion, montoTotal, montoAbonado, metodoPago, esUrgente, prioridad, detalles } = body;
 
     // Validation
     if (!clienteNombre || !tipoCliente || !fechaComprometida || montoTotal === undefined || montoAbonado === undefined || !metodoPago || !detalles || detalles.length === 0) {
@@ -65,10 +65,12 @@ export async function POST(req: NextRequest) {
       clienteNombre,
       tipoCliente,
       fechaComprometida,
+      fechaProduccion,
       montoTotal: Number(montoTotal),
       montoAbonado: Number(montoAbonado),
       metodoPago,
       esUrgente: !!esUrgente,
+      prioridad,
       detalles: detalles.map((d: any) => ({
         productoId: d.productoId,
         largo: Number(d.largo),

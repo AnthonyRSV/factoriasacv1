@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import prisma, { testDbConnection } from './db';
-import { Role, TipoMateriaPrima, TipoCliente, EstadoOrden, TipoMovimiento } from '@prisma/client';
+import { Role, TipoMateriaPrima, TipoCliente, EstadoOrden, TipoMovimiento, PrioridadOrden } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 
 // Configuration for local JSON DB fallback
@@ -108,6 +108,8 @@ function ensureMockDbInitialized() {
         tipoCliente: TipoCliente.EMPRESA,
         estado: EstadoOrden.PENDIENTE_PAGO,
         fechaComprometida: new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString(),
+        fechaProduccion: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString(),
+        prioridad: PrioridadOrden.NORMAL,
         montoTotal: 1500.0,
         montoAbonado: 750.0,
         metodoPago: 'TRANSFERENCIA_BANCARIA',
@@ -124,6 +126,8 @@ function ensureMockDbInitialized() {
         tipoCliente: TipoCliente.EMPRESA,
         estado: EstadoOrden.APROBADA,
         fechaComprometida: new Date(Date.now() + 4 * 24 * 60 * 60 * 1000).toISOString(),
+        fechaProduccion: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString(),
+        prioridad: PrioridadOrden.URGENTE,
         montoTotal: 2500.0,
         montoAbonado: 2500.0,
         metodoPago: 'TRANSFERENCIA_BANCARIA',
@@ -375,10 +379,12 @@ export async function createOrder(data: {
   clienteNombre: string;
   tipoCliente: TipoCliente;
   fechaComprometida: string;
+  fechaProduccion?: string;
   montoTotal: number;
   montoAbonado: number;
   metodoPago: string;
   esUrgente: boolean;
+  prioridad?: PrioridadOrden;
   detalles: Array<{
     productoId: string;
     largo: number;
@@ -440,10 +446,12 @@ export async function createOrder(data: {
           tipoCliente: data.tipoCliente,
           estado: initialStatus,
           fechaComprometida: new Date(data.fechaComprometida),
+          fechaProduccion: data.fechaProduccion ? new Date(data.fechaProduccion) : null,
           montoTotal: finalMontoTotal,
           montoAbonado: data.montoAbonado,
           metodoPago: data.metodoPago,
           esUrgente: data.esUrgente,
+          prioridad: data.prioridad || PrioridadOrden.NORMAL,
           cargoUrgencia: cargoUrgencia,
         },
       });
@@ -491,6 +499,8 @@ export async function createOrder(data: {
       tipoCliente: data.tipoCliente,
       estado: initialStatus,
       fechaComprometida: new Date(data.fechaComprometida).toISOString(),
+      fechaProduccion: data.fechaProduccion ? new Date(data.fechaProduccion).toISOString() : null,
+      prioridad: data.prioridad || PrioridadOrden.NORMAL,
       montoTotal: finalMontoTotal,
       montoAbonado: data.montoAbonado,
       metodoPago: data.metodoPago,
@@ -681,6 +691,8 @@ async function executeApprovalSideEffectsMock(ordenId: string) {
 
 export async function modifyOrder(id: string, data: {
   fechaComprometida?: string;
+  fechaProduccion?: string;
+  prioridad?: PrioridadOrden;
   colorPintura?: string;
   tuercasTipo?: string;
   clienteNombre?: string;
@@ -700,6 +712,8 @@ export async function modifyOrder(id: string, data: {
     // In Postgres, let's update details and/or orders
     const updateData: any = {};
     if (data.fechaComprometida) updateData.fechaComprometida = new Date(data.fechaComprometida);
+    if (data.fechaProduccion) updateData.fechaProduccion = new Date(data.fechaProduccion);
+    if (data.prioridad) updateData.prioridad = data.prioridad;
     if (data.clienteNombre) updateData.clienteNombre = data.clienteNombre;
 
     const order = await prisma.ordenesFabricacion.update({
@@ -724,6 +738,8 @@ export async function modifyOrder(id: string, data: {
     if (!o) throw new Error('Orden no encontrada');
 
     if (data.fechaComprometida) o.fechaComprometida = new Date(data.fechaComprometida).toISOString();
+    if (data.fechaProduccion) o.fechaProduccion = new Date(data.fechaProduccion).toISOString();
+    if (data.prioridad) o.prioridad = data.prioridad;
     if (data.clienteNombre) o.clienteNombre = data.clienteNombre;
     o.actualizadoEn = new Date().toISOString();
 

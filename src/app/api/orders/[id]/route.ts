@@ -46,10 +46,12 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     if (!authResult.authorized) return authResult.errorResponse!;
 
     const body = await req.json();
-    const { fechaComprometida, colorPintura, tuercasTipo, clienteNombre } = body;
+    const { fechaComprometida, fechaProduccion, prioridad, colorPintura, tuercasTipo, clienteNombre } = body;
 
     const updated = await modifyOrder(id, {
       fechaComprometida,
+      fechaProduccion,
+      prioridad,
       colorPintura,
       tuercasTipo,
       clienteNombre,
