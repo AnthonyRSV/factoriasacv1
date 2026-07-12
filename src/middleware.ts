@@ -5,7 +5,7 @@ import { Role } from '@prisma/client';
 // Define route permissions
 const routePermissions: Record<string, Role[]> = {
   '/api/orders': [Role.ADMIN, Role.VENDEDOR, Role.JEFE_TALLER, Role.ALMACENERO],
-  '/api/inventory': [Role.ADMIN, Role.ALMACENERO, Role.JEFE_TALLER],
+  '/api/inventory': [Role.ADMIN, Role.ALMACENERO, Role.JEFE_TALLER, Role.VENDEDOR],
   '/api/inventory/authorize': [Role.ADMIN, Role.JEFE_TALLER],
   '/api/stages': [Role.ADMIN, Role.JEFE_TALLER],
   '/api/reports': [Role.ADMIN],

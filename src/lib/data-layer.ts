@@ -384,16 +384,13 @@ export async function createOrder(data: {
   const isPg = await checkDbMode();
 
   // Validate Payment rules (RF-06)
-  const isExternalClient = data.clienteNombre.toLowerCase() !== 'tienda';
-  const minDepositPercent = 0.50; // 50%
-  
-  // Exception: Damper (or other big companies) auto approves.
-  const isBigCompany = data.clienteNombre.toLowerCase().includes('damper');
+  // Exception: Damper (or other big companies) auto approves and is exempt from 50% check.
+  const isCorporateExempt = data.clienteNombre.toLowerCase().includes('damper');
 
-  if (isExternalClient && !isBigCompany) {
-    const minAbonado = data.montoTotal * minDepositPercent;
+  if (!isCorporateExempt) {
+    const minAbonado = data.montoTotal * 0.50;
     if (data.montoAbonado < minAbonado) {
-      throw new Error(`Los clientes externos requieren un abono mínimo del 50% (Mínimo: ${minAbonado} Soles).`);
+      throw new Error(`Se requiere un abono mínimo del 50% para clientes de tienda (Mínimo: S/. ${minAbonado.toFixed(2)} Soles).`);
     }
   }
 
@@ -412,7 +409,7 @@ export async function createOrder(data: {
 
   // Set the initial status based on payment or client type
   let initialStatus: EstadoOrden = EstadoOrden.PENDIENTE_PAGO;
-  if (isBigCompany) {
+  if (isCorporateExempt) {
     initialStatus = EstadoOrden.APROBADA; // Auto-approved
   } else if (data.montoAbonado >= data.montoTotal) {
     initialStatus = EstadoOrden.APROBADA; // Paid in full
@@ -679,6 +676,15 @@ export async function modifyOrder(id: string, data: {
   clienteNombre?: string;
 }) {
   const isPg = await checkDbMode();
+
+  const orderBefore = await getOrderById(id);
+  if (!orderBefore) throw new Error('Orden no encontrada');
+
+  // Verify before starting production (RF-03)
+  const hasStarted = orderBefore.procesos?.some((p: any) => p.completada);
+  if (hasStarted) {
+    throw new Error('No es posible modificar la orden. La fabricación ya ha iniciado.');
+  }
 
   if (isPg) {
     // In Postgres, let's update details and/or orders
