@@ -24,7 +24,12 @@ import {
   Eye,
   EyeOff,
   Calendar,
+  Trash2,
+  Camera,
+  Upload,
+  Edit,
 } from 'lucide-react';
+import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import CalendarioProduccion from './components/CalendarioProduccion';
 import SeguimientoOrdenes from './components/SeguimientoOrdenes';
 
@@ -74,13 +79,7 @@ const SidebarButton = ({ active, icon, label, onClick }: { active: boolean, icon
   );
 };
 
-// Predefined Roles for testing RBAC
-const SYSTEM_USERS = [
-  { name: 'Laura Vendedora', role: 'VENDEDOR', email: 'vendedor@metal.com' },
-  { name: 'Manuel Jefe Taller', role: 'JEFE_TALLER', email: 'jefe@metal.com' },
-  { name: 'Juan Almacenero', role: 'ALMACENERO', email: 'almacenero@metal.com' },
-  { name: 'Carlos Admin', role: 'ADMIN', email: 'admin@metal.com' },
-];
+
 
 export default function Home() {
   // Authentication State with NextAuth
@@ -177,6 +176,30 @@ export default function Home() {
     distribuidor: 'Ansec',
   });
 
+  const [userForm, setUserForm] = useState({
+    name: '',
+    email: '',
+    password: '',
+    role: 'VENDEDOR',
+    image: '',
+  });
+  const [isCreatingUser, setIsCreatingUser] = useState(false);
+  const [editingUserId, setEditingUserId] = useState<string | null>(null);
+
+  const [mpForm, setMpForm] = useState({
+    codigo: '',
+    nombre: '',
+    tipo: 'VARILLA',
+    diametro: '',
+    espesor: '',
+    stockActual: 0,
+    stockMinimo: 0,
+  });
+  const [isCreatingMP, setIsCreatingMP] = useState(false);
+  const [editingMPId, setEditingMPId] = useState<string | null>(null);
+
+  const [inventorySubTab, setInventorySubTab] = useState<'produccion' | 'comercial'>('produccion');
+
   const [formError, setFormError] = useState<string | null>(null);
   const [formSuccess, setFormSuccess] = useState<string | null>(null);
 
@@ -256,9 +279,16 @@ export default function Home() {
         }
 
         // 4. Fetch Users (Only for ADMIN)
-        // Since there's no API yet, we'll use seed data for now
-        // We'll create an API endpoint later if needed
-        setUsers(SYSTEM_USERS);
+        const usersRes = await fetch(`/api/users?_t=${Date.now()}`, { 
+          headers: { ...getHeaders(), 'Cache-Control': 'no-cache' },
+          cache: 'no-store'
+        });
+        if (usersRes.ok) {
+          const usersData = await usersRes.json();
+          setUsers(Array.isArray(usersData) ? usersData : []);
+        } else {
+          console.error("Failed to fetch users:", await usersRes.text());
+        }
       }
     } catch (err) {
       console.error('Error fetching data:', err);
@@ -581,6 +611,134 @@ export default function Home() {
     }
   };
 
+  const handleSaveUserSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setFormError(null);
+    setFormSuccess(null);
+    try {
+      const url = editingUserId ? `/api/users/${editingUserId}` : '/api/users';
+      const method = editingUserId ? 'PUT' : 'POST';
+      const res = await fetch(url, {
+        method,
+        headers: getHeaders(),
+        body: JSON.stringify(userForm),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setFormSuccess(editingUserId ? 'Usuario actualizado exitosamente.' : 'Usuario creado exitosamente.');
+        setUserForm({ name: '', email: '', password: '', role: 'VENDEDOR', image: '' });
+        setIsCreatingUser(false);
+        setEditingUserId(null);
+        loadData();
+      } else {
+        setFormError(data.error || (editingUserId ? 'Error al actualizar usuario.' : 'Error al crear usuario.'));
+      }
+    } catch (err: any) {
+      setFormError(editingUserId ? 'Error de red al actualizar usuario.' : 'Error de red al crear usuario.');
+    }
+  };
+
+  const handleEditUserClick = (user: any) => {
+    setUserForm({
+      name: user.name,
+      email: user.email,
+      password: '',
+      role: user.role,
+      image: user.image || '',
+    });
+    setEditingUserId(user.id);
+    setIsCreatingUser(true);
+  };
+
+  const handleDeleteUser = async (id: string) => {
+    if (!confirm('¿Está seguro de eliminar este usuario?')) return;
+    try {
+      const res = await fetch(`/api/users/${id}`, {
+        method: 'DELETE',
+        headers: getHeaders(),
+      });
+      if (res.ok) {
+        setFormSuccess('Usuario eliminado.');
+        loadData();
+      } else {
+        setFormError('Error al eliminar usuario.');
+      }
+    } catch (err: any) {
+      setFormError('Error de red al eliminar usuario.');
+    }
+  };
+
+  const handleSaveMPSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setFormError(null);
+    setFormSuccess(null);
+    try {
+      const url = editingMPId ? `/api/materia-prima/${editingMPId}` : '/api/materia-prima';
+      const method = editingMPId ? 'PUT' : 'POST';
+      const res = await fetch(url, {
+        method,
+        headers: getHeaders(),
+        body: JSON.stringify(mpForm),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setFormSuccess(editingMPId ? 'Materia Prima actualizada.' : 'Materia Prima creada.');
+        setMpForm({ codigo: '', nombre: '', tipo: 'VARILLA', diametro: '', espesor: '', stockActual: 0, stockMinimo: 0 });
+        setIsCreatingMP(false);
+        setEditingMPId(null);
+        loadData();
+      } else {
+        setFormError(data.error || 'Error al guardar materia prima.');
+      }
+    } catch (err: any) {
+      setFormError('Error de red.');
+    }
+  };
+
+  const handleEditMPClick = (mp: any) => {
+    setMpForm({
+      codigo: mp.codigo,
+      nombre: mp.nombre,
+      tipo: mp.tipo,
+      diametro: mp.diametro || '',
+      espesor: mp.espesor || '',
+      stockActual: mp.stockActual,
+      stockMinimo: mp.stockMinimo,
+    });
+    setEditingMPId(mp.id);
+    setIsCreatingMP(true);
+  };
+
+  const handleDeleteMP = async (id: string) => {
+    if (!confirm('¿Está seguro de eliminar esta materia prima?')) return;
+    try {
+      const res = await fetch(`/api/materia-prima/${id}`, {
+        method: 'DELETE',
+        headers: getHeaders(),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setFormSuccess('Materia prima eliminada.');
+        loadData();
+      } else {
+        setFormError(data.error || 'Error al eliminar materia prima.');
+      }
+    } catch (err: any) {
+      setFormError('Error de red.');
+    }
+  };
+
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setUserForm((prev) => ({ ...prev, image: reader.result as string }));
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
   // ----------------------------------------------------
   // INTERFACE RENDERING HELPERS
   // ----------------------------------------------------
@@ -880,6 +1038,18 @@ export default function Home() {
           {currentUser.role === 'ALMACENERO' && (
             <>
               <SidebarButton
+                active={activeTab === 'restock'}
+                icon={<ShoppingCart size={18} strokeWidth={2} />}
+                label="Ingresar Compra"
+                onClick={() => { setActiveTab('restock'); setFormError(null); setFormSuccess(null); }}
+              />
+              <SidebarButton
+                active={activeTab === 'materia_prima'}
+                icon={<PackageOpen size={18} strokeWidth={2} />}
+                label="Materia Prima (CRUD)"
+                onClick={() => setActiveTab('materia_prima')}
+              />
+              <SidebarButton
                 active={activeTab === 'inventory'}
                 icon={<PackageOpen size={18} strokeWidth={2} />}
                 label="Inventario Dual"
@@ -890,12 +1060,6 @@ export default function Home() {
                 icon={<ListOrdered size={18} strokeWidth={2} />}
                 label="Kardex de Movimientos"
                 onClick={() => setActiveTab('kardex')}
-              />
-              <SidebarButton
-                active={activeTab === 'restock'}
-                icon={<ShoppingCart size={18} strokeWidth={2} />}
-                label="Ingresar Compra"
-                onClick={() => { setActiveTab('restock'); setFormError(null); setFormSuccess(null); }}
               />
             </>
           )}
@@ -1137,6 +1301,63 @@ export default function Home() {
               </div>
             </div>
 
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1.5rem', marginBottom: '1.5rem' }}>
+              <div style={{ background: '#FFFFFF', padding: '1.25rem', borderRadius: '10px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', border: '1px solid #E2E8F0' }}>
+                <h3 style={{ margin: '0 0 1rem', fontSize: '0.95rem', fontWeight: 600, color: '#1E293B' }}>Estado de Órdenes</h3>
+                <div style={{ width: '100%', height: '250px' }}>
+                  <ResponsiveContainer>
+                    <PieChart>
+                      <Pie 
+                        data={[
+                          { name: 'Pendientes', value: orders.filter(o => o.estado === 'PENDIENTE_PAGO').length, color: '#F59E0B' },
+                          { name: 'Aprobadas', value: orders.filter(o => o.estado === 'APROBADA').length, color: '#10B981' },
+                          { name: 'En Producción', value: orders.filter(o => o.estado === 'EN_PRODUCCION').length, color: '#3B82F6' },
+                          { name: 'Terminadas', value: orders.filter(o => o.estado === 'TERMINADA').length, color: '#6366F1' },
+                          { name: 'Entregadas', value: orders.filter(o => o.estado === 'ENTREGADA').length, color: '#8B5CF6' }
+                        ].filter(d => d.value > 0)} 
+                        innerRadius={60} 
+                        outerRadius={80} 
+                        paddingAngle={5} 
+                        dataKey="value"
+                      >
+                        {[
+                          { name: 'Pendientes', value: orders.filter(o => o.estado === 'PENDIENTE_PAGO').length, color: '#F59E0B' },
+                          { name: 'Aprobadas', value: orders.filter(o => o.estado === 'APROBADA').length, color: '#10B981' },
+                          { name: 'En Producción', value: orders.filter(o => o.estado === 'EN_PRODUCCION').length, color: '#3B82F6' },
+                          { name: 'Terminadas', value: orders.filter(o => o.estado === 'TERMINADA').length, color: '#6366F1' },
+                          { name: 'Entregadas', value: orders.filter(o => o.estado === 'ENTREGADA').length, color: '#8B5CF6' }
+                        ].filter(d => d.value > 0).map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip />
+                      <Legend />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              <div style={{ background: '#FFFFFF', padding: '1.25rem', borderRadius: '10px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', border: '1px solid #E2E8F0' }}>
+                <h3 style={{ margin: '0 0 1rem', fontSize: '0.95rem', fontWeight: 600, color: '#1E293B' }}>Stock vs Mínimo</h3>
+                <div style={{ width: '100%', height: '250px' }}>
+                  <ResponsiveContainer>
+                    <BarChart data={materials.map(m => ({
+                      name: m.nombre.length > 10 ? m.nombre.substring(0, 10) + '...' : m.nombre,
+                      Stock: m.stockActual,
+                      'Mínimo': m.stockMinimo
+                    })).slice(0, 5)}>
+                      <XAxis dataKey="name" tick={{ fontSize: 10 }} />
+                      <YAxis />
+                      <Tooltip />
+                      <Legend />
+                      <Bar dataKey="Stock" fill="#4F46E5" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="Mínimo" fill="#EF4444" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            </div>
+
             {/* Recent Orders */}
             <div style={{ 
               background: '#FFFFFF', 
@@ -1206,7 +1427,64 @@ export default function Home() {
             boxShadow: '0 1px 3px rgba(0,0,0,0.05), 0 1px 2px rgba(0,0,0,0.05)',
             border: '1px solid #E2E8F0'
           }}>
-            <h3 style={{ margin: '0 0 1rem', fontSize: '0.95rem', fontWeight: 600, color: '#1E293B' }}>Lista de Usuarios</h3>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+              <h3 style={{ margin: '0', fontSize: '0.95rem', fontWeight: 600, color: '#1E293B' }}>Lista de Usuarios</h3>
+              <button 
+                className="btn btnPrimary" 
+                onClick={() => { setIsCreatingUser(!isCreatingUser); setEditingUserId(null); setUserForm({ name: '', email: '', password: '', role: 'VENDEDOR', image: '' }); }}
+                style={{ padding: '0.5rem 1rem', fontSize: '0.85rem' }}
+              >
+                {isCreatingUser ? 'Cerrar Formulario' : '+ Crear Usuario'}
+              </button>
+            </div>
+
+            {isCreatingUser && (
+              <form onSubmit={handleSaveUserSubmit} style={{ background: '#F8FAFC', padding: '1rem', borderRadius: '10px', marginBottom: '1.5rem', border: '1px solid #E2E8F0' }}>
+                <h4 style={{ marginTop: 0, marginBottom: '1rem' }}>{editingUserId ? 'Editar Usuario' : 'Nuevo Usuario'}</h4>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                  <div className="formGroup">
+                    <label>Nombre</label>
+                    <input type="text" required value={userForm.name} onChange={e => setUserForm({...userForm, name: e.target.value})} />
+                  </div>
+                  <div className="formGroup">
+                    <label>Correo Electrónico</label>
+                    <input type="email" required value={userForm.email} onChange={e => setUserForm({...userForm, email: e.target.value})} />
+                  </div>
+                  <div className="formGroup">
+                    <label>{editingUserId ? 'Contraseña (Dejar en blanco para no cambiar)' : 'Contraseña'}</label>
+                    <input type="password" required={!editingUserId} value={userForm.password} onChange={e => setUserForm({...userForm, password: e.target.value})} />
+                  </div>
+                  <div className="formGroup">
+                    <label>Rol</label>
+                    <select value={userForm.role} onChange={e => setUserForm({...userForm, role: e.target.value})}>
+                      <option value="VENDEDOR">VENDEDOR</option>
+                      <option value="JEFE_TALLER">JEFE_TALLER</option>
+                      <option value="ALMACENERO">ALMACENERO</option>
+                      <option value="ADMIN">ADMIN</option>
+                    </select>
+                  </div>
+                  <div className="formGroup" style={{ gridColumn: '1 / -1' }}>
+                    <label>Foto de Perfil (Opcional)</label>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                      <input type="file" accept="image/*" id="user-image" style={{ display: 'none' }} onChange={handleImageUpload} />
+                      <label htmlFor="user-image" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 1rem', background: '#FFFFFF', border: '1px solid #CBD5E1', borderRadius: '6px', cursor: 'pointer', fontSize: '0.85rem' }}>
+                        <Upload size={16} /> Subir Imagen
+                      </label>
+                      {userForm.image && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                          <img src={userForm.image} alt="Preview" style={{ width: '40px', height: '40px', borderRadius: '50%', objectFit: 'cover' }} />
+                          <button type="button" onClick={() => setUserForm({...userForm, image: ''})} style={{ background: 'none', border: 'none', color: '#EF4444', cursor: 'pointer', fontSize: '0.85rem' }}>Quitar</button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <div style={{ marginTop: '1rem', display: 'flex', justifyContent: 'flex-end' }}>
+                  <button type="submit" className="btn btnPrimary">Guardar Usuario</button>
+                </div>
+              </form>
+            )}
+
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '1rem' }}>
               {users.map((user) => (
                 <div key={user.email} style={{
@@ -1216,24 +1494,47 @@ export default function Home() {
                   background: '#FAFAFA',
                   display: 'flex',
                   flexDirection: 'column',
-                  gap: '0.5rem'
+                  gap: '0.5rem',
+                  position: 'relative'
                 }}>
+                  <div style={{ position: 'absolute', top: '0.5rem', right: '0.5rem', display: 'flex', gap: '0.25rem' }}>
+                    <button 
+                      onClick={() => handleEditUserClick(user)}
+                      style={{ background: 'none', border: 'none', color: '#64748B', cursor: 'pointer', padding: '0.25rem' }}
+                      title="Editar"
+                    >
+                      <Edit size={16} />
+                    </button>
+                    {user.id !== currentUser.id && (
+                      <button 
+                        onClick={() => handleDeleteUser(user.id)}
+                        style={{ background: 'none', border: 'none', color: '#94A3B8', cursor: 'pointer', padding: '0.25rem' }}
+                        title="Eliminar"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    )}
+                  </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.875rem', marginBottom: '0.25rem' }}>
-                    <div style={{
-                      width: '40px',
-                      height: '40px',
-                      borderRadius: '10px',
-                      background: 'linear-gradient(135deg, #4F46E5 0%, #2563EB 100%)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      color: '#FFFFFF',
-                      fontSize: '0.95rem',
-                      fontWeight: 700
-                    }}>
-                      {user.name.charAt(0)}
-                    </div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
+                    {user.image ? (
+                      <img src={user.image} alt={user.name} style={{ width: '40px', height: '40px', borderRadius: '10px', objectFit: 'cover' }} />
+                    ) : (
+                      <div style={{
+                        width: '40px',
+                        height: '40px',
+                        borderRadius: '10px',
+                        background: 'linear-gradient(135deg, #4F46E5 0%, #2563EB 100%)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: '#FFFFFF',
+                        fontSize: '0.95rem',
+                        fontWeight: 700
+                      }}>
+                        {user.name.charAt(0)}
+                      </div>
+                    )}
+                    <div style={{ flex: 1, minWidth: 0, paddingRight: '1.5rem' }}>
                       <p style={{ margin: 0, fontSize: '0.875rem', fontWeight: 600, color: '#1E293B', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{user.name}</p>
                       <span style={{
                         display: 'inline-flex',
@@ -1271,7 +1572,7 @@ export default function Home() {
             <div className="card">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
                 <h3>Historial de Órdenes de Fabricación</h3>
-                {currentUser.role === 'VENDEDOR' && (
+                {(currentUser.role === 'VENDEDOR' || currentUser.role === 'ADMIN') && (
                   <button className="btn btnPrimary" onClick={() => setActiveTab('new_order')}>+ Crear Cotización</button>
                 )}
               </div>
@@ -1714,102 +2015,226 @@ export default function Home() {
         )}
 
         {/* ----------------------------------------------------
+            TAB: MATERIA PRIMA CRUD
+            ---------------------------------------------------- */}
+        {activeTab === 'materia_prima' && (
+          <div className="tabContent">
+            <div className="card">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+                <h3>Gestión de Materia Prima</h3>
+                <button 
+                  className="btn btnPrimary" 
+                  onClick={() => { setIsCreatingMP(!isCreatingMP); setEditingMPId(null); setMpForm({ codigo: '', nombre: '', tipo: 'VARILLA', diametro: '', espesor: '', stockActual: 0, stockMinimo: 0 }); }}
+                >
+                  {isCreatingMP ? 'Cancelar' : '+ Nueva Materia Prima'}
+                </button>
+              </div>
+
+              {isCreatingMP && (
+                <form onSubmit={handleSaveMPSubmit} style={{ background: 'rgba(79,70,229,0.03)', padding: '1.5rem', borderRadius: '10px', marginBottom: '2rem', border: '1px solid rgba(79,70,229,0.1)' }}>
+                  <h4 style={{ marginTop: 0, marginBottom: '1rem', color: 'var(--color-primary)' }}>{editingMPId ? 'Editar Materia Prima' : 'Nueva Materia Prima'}</h4>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
+                    <div className="formGroup">
+                      <label>Código Interno</label>
+                      <input type="text" required value={mpForm.codigo} onChange={e => setMpForm({...mpForm, codigo: e.target.value})} placeholder="Ej: MAT-001" />
+                    </div>
+                    <div className="formGroup" style={{ gridColumn: 'span 2' }}>
+                      <label>Nombre / Descripción</label>
+                      <input type="text" required value={mpForm.nombre} onChange={e => setMpForm({...mpForm, nombre: e.target.value})} placeholder="Ej: Acero Inoxidable 304" />
+                    </div>
+                    <div className="formGroup">
+                      <label>Tipo</label>
+                      <select value={mpForm.tipo} onChange={e => setMpForm({...mpForm, tipo: e.target.value})}>
+                        <option value="VARILLA">VARILLA</option>
+                        <option value="PLATINA">PLATINA</option>
+                        <option value="MUELLE">MUELLE</option>
+                        <option value="TUERCA">TUERCA</option>
+                        <option value="ARANDELA">ARANDELA</option>
+                      </select>
+                    </div>
+                    <div className="formGroup">
+                      <label>Diámetro (opcional)</label>
+                      <input type="text" value={mpForm.diametro} onChange={e => setMpForm({...mpForm, diametro: e.target.value})} placeholder='Ej: 1/2"' />
+                    </div>
+                    <div className="formGroup">
+                      <label>Espesor (opcional)</label>
+                      <input type="text" value={mpForm.espesor} onChange={e => setMpForm({...mpForm, espesor: e.target.value})} placeholder='Ej: 1/4"' />
+                    </div>
+                    <div className="formGroup">
+                      <label>Stock Actual</label>
+                      <input type="number" step="0.01" required value={mpForm.stockActual} onChange={e => setMpForm({...mpForm, stockActual: parseFloat(e.target.value) || 0})} />
+                    </div>
+                    <div className="formGroup">
+                      <label>Stock Mínimo</label>
+                      <input type="number" step="0.01" required value={mpForm.stockMinimo} onChange={e => setMpForm({...mpForm, stockMinimo: parseFloat(e.target.value) || 0})} />
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1.5rem' }}>
+                    <button type="submit" className="btn btnPrimary">{editingMPId ? 'Guardar Cambios' : 'Registrar Materia Prima'}</button>
+                  </div>
+                </form>
+              )}
+
+              <div className="tableContainer">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Código</th>
+                      <th>Nombre</th>
+                      <th>Tipo</th>
+                      <th>Stock Actual</th>
+                      <th>Mínimo</th>
+                      <th style={{ width: '80px', textAlign: 'center' }}>Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {materials.filter(m => !m.codigo.startsWith('COM-')).map(mp => (
+                      <tr key={mp.id}>
+                        <td><code>{mp.codigo}</code></td>
+                        <td><strong>{mp.nombre}</strong><br/><span style={{fontSize:'0.75rem', color: 'var(--color-text-muted)'}}>{mp.diametro ? `Ø ${mp.diametro}` : ''} {mp.espesor ? `Esp. ${mp.espesor}` : ''}</span></td>
+                        <td><span className="badge">{mp.tipo}</span></td>
+                        <td>{mp.stockActual}</td>
+                        <td>{mp.stockMinimo}</td>
+                        <td style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center' }}>
+                          <button onClick={() => handleEditMPClick(mp)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-primary)' }} title="Editar"><Edit size={16}/></button>
+                          <button onClick={() => handleDeleteMP(mp.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-danger)' }} title="Eliminar"><Trash2 size={16}/></button>
+                        </td>
+                      </tr>
+                    ))}
+                    {materials.filter(m => !m.codigo.startsWith('COM-')).length === 0 && (
+                      <tr><td colSpan={6} style={{ textAlign: 'center', padding: '2rem' }}>No hay materia prima registrada.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ----------------------------------------------------
             TAB: DUAL INVENTORY (Almacenero, Jefe, Admin view)
             ---------------------------------------------------- */}
         {activeTab === 'inventory' && (
           <div className="tabContent">
-            <div className="grid2">
-              {/* Production stock */}
-              <div className="card">
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
-                  <h3>Inventario de Insumos (Producción)</h3>
-                  <span style={{ fontSize: '0.75rem', background: 'rgba(99,102,241,0.1)', color: 'var(--color-primary)', padding: '0.2rem 0.5rem', borderRadius: '4px', fontWeight: 'bold' }}>Control de Materia Prima</span>
-                </div>
-
-                <div className="tableContainer">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Código</th>
-                        <th>Nombre / Descripción</th>
-                        <th>Tipo</th>
-                        <th>Medidas</th>
-                        <th>Stock Actual</th>
-                        <th>Mínimo</th>
-                        <th>Estado</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {materials.filter(m => !m.codigo.startsWith('COM-')).map((mat) => {
-                        const isLow = mat.stockActual <= mat.stockMinimo;
-                        return (
-                          <tr key={mat.id} className={isLow ? 'stockLow' : ''}>
-                            <td><code>{mat.codigo}</code></td>
-                            <td><strong>{mat.nombre}</strong></td>
-                            <td><span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--color-text-secondary)' }}>{mat.tipo}</span></td>
-                            <td>
-                              {mat.diametro ? `Ø ${mat.diametro}"` : ''}
-                              {mat.espesor ? ` Esp. ${mat.espesor}"` : ''}
-                              {!mat.diametro && !mat.espesor ? 'N/A' : ''}
-                            </td>
-                            <td><strong>{mat.stockActual.toFixed(2)}</strong></td>
-                            <td>{mat.stockMinimo.toFixed(2)}</td>
-                            <td>
-                              {isLow ? (
-                                <span className="badge" style={{ background: 'rgba(239, 68, 68, 0.2)', color: 'var(--color-danger)', fontWeight: 'bold' }}>Alerta Minimo</span>
-                              ) : (
-                                <span className="badge" style={{ background: 'rgba(16, 185, 129, 0.2)', color: 'var(--color-success)' }}>Suficiente</span>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+            <div className="card">
+              <div style={{ display: 'flex', gap: '1.5rem', borderBottom: '2px solid #E2E8F0', paddingBottom: '0.5rem', marginBottom: '1.5rem' }}>
+                <button
+                  onClick={() => setInventorySubTab('produccion')}
+                  style={{
+                    background: 'none', border: 'none', fontSize: '1rem', fontWeight: 600, cursor: 'pointer',
+                    color: inventorySubTab === 'produccion' ? 'var(--color-primary)' : 'var(--color-text-secondary)',
+                    borderBottom: inventorySubTab === 'produccion' ? '2px solid var(--color-primary)' : 'none',
+                    paddingBottom: '0.5rem', marginBottom: '-0.65rem'
+                  }}
+                >
+                  Insumos (Producción)
+                </button>
+                <button
+                  onClick={() => setInventorySubTab('comercial')}
+                  style={{
+                    background: 'none', border: 'none', fontSize: '1rem', fontWeight: 600, cursor: 'pointer',
+                    color: inventorySubTab === 'comercial' ? 'var(--color-primary)' : 'var(--color-text-secondary)',
+                    borderBottom: inventorySubTab === 'comercial' ? '2px solid var(--color-primary)' : 'none',
+                    paddingBottom: '0.5rem', marginBottom: '-0.65rem'
+                  }}
+                >
+                  Comercial (Venta Directa)
+                </button>
               </div>
 
-              {/* Commercial stock */}
-              <div className="card">
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
-                  <h3>Inventario Comercial (Venta Directa)</h3>
-                  <span style={{ fontSize: '0.75rem', background: 'rgba(20, 184, 166, 0.1)', color: 'var(--color-accent)', padding: '0.2rem 0.5rem', borderRadius: '4px', fontWeight: 'bold' }}>Productos Estandarizados</span>
-                </div>
+              {inventorySubTab === 'produccion' && (
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+                    <h3 style={{ margin: 0 }}>Inventario de Insumos (Producción)</h3>
+                    <span style={{ fontSize: '0.75rem', background: 'rgba(99,102,241,0.1)', color: 'var(--color-primary)', padding: '0.2rem 0.5rem', borderRadius: '4px', fontWeight: 'bold' }}>Control de Materia Prima</span>
+                  </div>
 
-                <div className="tableContainer">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Código</th>
-                        <th>Nombre Producto</th>
-                        <th>Stock Tienda</th>
-                        <th>Mínimo</th>
-                        <th>Estado</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {materials.filter(m => m.codigo.startsWith('COM-')).map((mat) => {
-                        const isLow = mat.stockActual <= mat.stockMinimo;
-                        return (
-                          <tr key={mat.id} className={isLow ? 'stockLow' : ''}>
-                            <td><code>{mat.codigo}</code></td>
-                            <td><strong>{mat.nombre}</strong></td>
-                            <td><strong>{mat.stockActual.toFixed(2)}</strong></td>
-                            <td>{mat.stockMinimo.toFixed(2)}</td>
-                            <td>
-                              {isLow ? (
-                                <span className="badge" style={{ background: 'rgba(239, 68, 68, 0.2)', color: 'var(--color-danger)' }}>Bajo</span>
-                              ) : (
-                                <span className="badge" style={{ background: 'rgba(16, 185, 129, 0.2)', color: 'var(--color-success)' }}>Disponible</span>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
+                  <div className="tableContainer">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Código</th>
+                          <th>Nombre / Descripción</th>
+                          <th>Tipo</th>
+                          <th>Medidas</th>
+                          <th>Stock Actual</th>
+                          <th>Mínimo</th>
+                          <th>Estado</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {materials.filter(m => !m.codigo.startsWith('COM-')).map((mat) => {
+                          const isLow = mat.stockActual <= mat.stockMinimo;
+                          return (
+                            <tr key={mat.id} className={isLow ? 'stockLow' : ''}>
+                              <td><code>{mat.codigo}</code></td>
+                              <td><strong>{mat.nombre}</strong></td>
+                              <td><span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--color-text-secondary)' }}>{mat.tipo}</span></td>
+                              <td>
+                                {mat.diametro ? `Ø ${mat.diametro}"` : ''}
+                                {mat.espesor ? ` Esp. ${mat.espesor}"` : ''}
+                                {!mat.diametro && !mat.espesor ? 'N/A' : ''}
+                              </td>
+                              <td><strong>{mat.stockActual.toFixed(2)}</strong></td>
+                              <td>{mat.stockMinimo.toFixed(2)}</td>
+                              <td>
+                                {isLow ? (
+                                  <span className="badge" style={{ background: 'rgba(239, 68, 68, 0.2)', color: 'var(--color-danger)', fontWeight: 'bold' }}>Alerta Minimo</span>
+                                ) : (
+                                  <span className="badge" style={{ background: 'rgba(16, 185, 129, 0.2)', color: 'var(--color-success)' }}>Suficiente</span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
-              </div>
+              )}
+
+              {inventorySubTab === 'comercial' && (
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+                    <h3 style={{ margin: 0 }}>Inventario Comercial (Venta Directa)</h3>
+                    <span style={{ fontSize: '0.75rem', background: 'rgba(20, 184, 166, 0.1)', color: 'var(--color-accent)', padding: '0.2rem 0.5rem', borderRadius: '4px', fontWeight: 'bold' }}>Productos Estandarizados</span>
+                  </div>
+
+                  <div className="tableContainer">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Código</th>
+                          <th>Nombre Producto</th>
+                          <th>Stock Tienda</th>
+                          <th>Mínimo</th>
+                          <th>Estado</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {materials.filter(m => m.codigo.startsWith('COM-')).map((mat) => {
+                          const isLow = mat.stockActual <= mat.stockMinimo;
+                          return (
+                            <tr key={mat.id} className={isLow ? 'stockLow' : ''}>
+                              <td><code>{mat.codigo}</code></td>
+                              <td><strong>{mat.nombre}</strong></td>
+                              <td><strong>{mat.stockActual.toFixed(2)}</strong></td>
+                              <td>{mat.stockMinimo.toFixed(2)}</td>
+                              <td>
+                                {isLow ? (
+                                  <span className="badge" style={{ background: 'rgba(239, 68, 68, 0.2)', color: 'var(--color-danger)' }}>Bajo</span>
+                                ) : (
+                                  <span className="badge" style={{ background: 'rgba(16, 185, 129, 0.2)', color: 'var(--color-success)' }}>Disponible</span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}
