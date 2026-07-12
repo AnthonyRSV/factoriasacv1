@@ -59,7 +59,7 @@ const SidebarButton = ({ active, icon, label, onClick }: { active: boolean, icon
         }
       }}
     >
-      {React.cloneElement(icon as React.ReactElement, { 
+      {React.cloneElement(icon as any, { 
         strokeWidth: 2, 
         style: { 
           ...(icon as any).props?.style, 

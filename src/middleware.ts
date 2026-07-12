@@ -11,7 +11,7 @@ const routePermissions: Record<string, Role[]> = {
   '/api/reports': [Role.ADMIN],
 };
 
-export function middleware(req: NextRequest) {
+export async function middleware(req: NextRequest) {
   const path = req.nextUrl.pathname;
 
   // Allow public routes: login, logout, me, external
@@ -30,7 +30,7 @@ export function middleware(req: NextRequest) {
     return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
   }
 
-  const payload: JWTPayload | null = verifyToken(token);
+  const payload: JWTPayload | null = await verifyToken(token);
   if (!payload) {
     return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
   }
