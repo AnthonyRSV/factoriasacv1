@@ -5,13 +5,13 @@ import { Role } from '@prisma/client';
 // Define route permissions
 const routePermissions: Record<string, Role[]> = {
   '/api/orders': [Role.ADMIN, Role.VENDEDOR, Role.JEFE_TALLER, Role.ALMACENERO],
-  '/api/inventory': [Role.ADMIN, Role.ALMACENERO, Role.JEFE_TALLER],
+  '/api/inventory': [Role.ADMIN, Role.ALMACENERO, Role.JEFE_TALLER, Role.VENDEDOR],
   '/api/inventory/authorize': [Role.ADMIN, Role.JEFE_TALLER],
   '/api/stages': [Role.ADMIN, Role.JEFE_TALLER],
   '/api/reports': [Role.ADMIN],
 };
 
-export function middleware(req: NextRequest) {
+export async function middleware(req: NextRequest) {
   const path = req.nextUrl.pathname;
 
   // Allow public routes: login, logout, me, external
@@ -30,7 +30,7 @@ export function middleware(req: NextRequest) {
     return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
   }
 
-  const payload: JWTPayload | null = verifyToken(token);
+  const payload: JWTPayload | null = await verifyToken(token);
   if (!payload) {
     return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
   }

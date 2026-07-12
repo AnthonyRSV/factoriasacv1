@@ -1,41 +1,79 @@
 const BASE_URL = 'http://localhost:3000';
 
+// Helper to log in and get the auth_token cookie
+async function loginAndGetCookie(email, password) {
+  const res = await fetch(`${BASE_URL}/api/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+  });
+
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(`Login failed for ${email}: ${err.error}`);
+  }
+
+  const setCookie = res.headers.get('set-cookie');
+  if (!setCookie) {
+    throw new Error(`No Set-Cookie header returned for ${email}`);
+  }
+
+  // Extract auth_token value (e.g. auth_token=xxxx)
+  const token = setCookie.split(';')[0];
+  return token;
+}
+
 async function testSuite() {
-  console.log('🏁 Starting Programmatic Verification Suite...');
-  
-  // Headers for Seller (Laura Vendedora)
-  const sellerHeaders = {
-    'Content-Type': 'application/json',
-    'x-user-role': 'VENDEDOR',
-    'x-user-email': 'vendedor@metal.com',
-  };
-
-  // Headers for Almacenero (Juan Almacenero)
-  const almaceneroHeaders = {
-    'Content-Type': 'application/json',
-    'x-user-role': 'ALMACENERO',
-    'x-user-email': 'almacenero@metal.com',
-  };
-
-  // Headers for Jefe de Taller (Manuel Jefe Taller)
-  const jefeHeaders = {
-    'Content-Type': 'application/json',
-    'x-user-role': 'JEFE_TALLER',
-    'x-user-email': 'jefe@metal.com',
-  };
-
-  // Headers for Admin (Carlos Admin)
-  const adminHeaders = {
-    'Content-Type': 'application/json',
-    'x-user-role': 'ADMIN',
-    'x-user-email': 'admin@metal.com',
-  };
+  console.log('🏁 Starting Programmatic Verification Suite with Cookie Auth...');
 
   try {
+    // 1. Programmatically log in to get session cookies for all roles
+    console.log('\nLogging in for all roles...');
+    
+    const vendedorCookie = await loginAndGetCookie('vendedor@metal.com', 'vendedor123');
+    console.log('✅ Logged in as VENDEDOR (Laura)');
+
+    const almaceneroCookie = await loginAndGetCookie('almacenero@metal.com', 'almacenero123');
+    console.log('✅ Logged in as ALMACENERO (Juan)');
+
+    const jefeCookie = await loginAndGetCookie('jefe@metal.com', 'jefe123');
+    console.log('✅ Logged in as JEFE_TALLER (Manuel)');
+
+    const adminCookie = await loginAndGetCookie('admin@metal.com', 'admin123');
+    console.log('✅ Logged in as ADMIN (Carlos)');
+
+    // Headers with Cookie auth for each role
+    const sellerHeaders = {
+      'Content-Type': 'application/json',
+      'Cookie': vendedorCookie
+    };
+
+    const almaceneroHeaders = {
+      'Content-Type': 'application/json',
+      'Cookie': almaceneroCookie
+    };
+
+    const jefeHeaders = {
+      'Content-Type': 'application/json',
+      'Cookie': jefeCookie
+    };
+
+    const adminHeaders = {
+      'Content-Type': 'application/json',
+      'Cookie': adminCookie
+    };
+
+    // ----------------------------------------------------
+    // START TEST SUITE WORKFLOW
+    // ----------------------------------------------------
+
     // 1. Check current inventory stock levels
     console.log('\nStep 1: Fetching initial inventory...');
     const invRes = await fetch(`${BASE_URL}/api/inventory`, { headers: almaceneroHeaders });
-    if (!invRes.ok) throw new Error('Failed to fetch inventory');
+    if (!invRes.ok) {
+      const errText = await invRes.text();
+      throw new Error(`Failed to fetch inventory: ${invRes.status} - ${errText}`);
+    }
     const { materials, fichas } = await invRes.json();
     
     const varilla58 = materials.find(m => m.codigo === 'MP-VAR-58');
@@ -47,9 +85,6 @@ async function testSuite() {
     console.log(`✅ Success. Found product U-Bolt with formula: ${uboltFicha.formulaCalculo}`);
 
     // 2. Create an order for Consorcio Damper (marked as urgent)
-    // Formula calculations for U-Bolt 5/8": (largo * 2 + ancho + 0.1) * cantidad
-    // Specs: largo = 0.5, ancho = 0.3, cantidad = 20
-    // Material required = (0.5 * 2 + 0.3 + 0.1) * 20 = (1.0 + 0.3 + 0.1) * 20 = 1.4 * 20 = 28.0 meters of Varilla 5/8"
     console.log('\nStep 2: Creating a new urgent order for Consorcio Damper...');
     const orderPayload = {
       clienteNombre: 'Consorcio Damper',
@@ -84,7 +119,6 @@ async function testSuite() {
     const order = await createRes.json();
     console.log(`✅ Success. Order #${order.codigoCorrelativoUnico} created. ID: ${order.id}. Estado: ${order.estado}`);
     
-    // Assert auto-approval rules: Consorcio Damper is a large company, so it should be APROBADA
     if (order.estado !== 'APROBADA') {
       throw new Error(`Assertion failed: Order state is ${order.estado}, expected APROBADA`);
     }
@@ -153,7 +187,6 @@ async function testSuite() {
 
     // 8. Progress production stages
     console.log('\nStep 8: Completing Corte stage for Order...');
-    // We get order details to fetch process stage ID
     const orderDetailsRes = await fetch(`${BASE_URL}/api/orders/${order.id}`, { headers: jefeHeaders });
     const orderDetails = await orderDetailsRes.json();
     const corteStage = orderDetails.procesos.find(p => p.etapaNombre === 'Corte');
@@ -179,9 +212,8 @@ async function testSuite() {
     console.log(`   - Pending Orders: ${reportsData.pendingOrdersCount}`);
     console.log(`   - Delivered Orders: ${reportsData.deliveredOrdersCount}`);
     console.log(`   - Average Completion Speed: ${reportsData.avgHours} hours`);
-    console.log('   - Rankings of top products:', reportsData.ranking);
 
-    console.log('\n🎉 ALL VERIFICATION PASSED SUCCESSFULLY! The application works 100% correctly.');
+    console.log('\n🎉 ALL VERIFICATION PASSED SUCCESSFULLY! The application with Cookie Auth works 100% correctly.');
 
   } catch (err) {
     console.error('\n❌ VERIFICATION FAILED:', err.message);
