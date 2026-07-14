@@ -1763,12 +1763,13 @@ export default function Home() {
 
                   <div className="formRow">
                     <div className="formGroup">
-                      <label>Precio Total Calculado</label>
+                      <label>Precio Total (S/.)</label>
                       <input
-                        type="text"
-                        readOnly
-                        value={`S/. ${orderForm.montoTotal + (orderForm.esUrgente && isWorkshopAtCapacity ? orderForm.montoTotal * 0.15 : 0)}`}
-                        style={{ background: 'rgba(255,255,255,0.05)', fontWeight: 'bold' }}
+                        type="number"
+                        step="0.01"
+                        value={orderForm.montoTotal}
+                        onChange={(e) => handleFormChange('montoTotal', parseFloat(e.target.value) || 0)}
+                        style={{ fontWeight: 'bold' }}
                       />
                     </div>
                     {orderForm.tipoCliente !== 'EMPRESA' ? (
