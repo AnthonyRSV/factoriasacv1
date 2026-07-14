@@ -1664,19 +1664,6 @@ export default function Home() {
                     </div>
                   </div>
 
-                  {orderForm.tipoCliente === 'EMPRESA' && (
-                    <div className="formGroup" style={{ marginBottom: '1rem' }}>
-                      <label>Número de Orden de Compra (OC)</label>
-                      <input
-                        type="text"
-                        value={orderForm.numeroOrdenCompra || ''}
-                        placeholder="Ej. OC-2026-9842"
-                        onChange={(e) => handleFormChange('numeroOrdenCompra', e.target.value)}
-                        required
-                      />
-                    </div>
-                  )}
-
                   <div className="formGroup" style={{ marginBottom: '1rem' }}>
                     <label>Descripción del Producto (Medidas y Forma)</label>
                     <input
@@ -1784,15 +1771,28 @@ export default function Home() {
                         style={{ background: 'rgba(255,255,255,0.05)', fontWeight: 'bold' }}
                       />
                     </div>
-                    <div className="formGroup">
-                      <label>Abono Inicial del Pago</label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={orderForm.montoAbonado}
-                        onChange={(e) => setOrderForm(prev => ({ ...prev, montoAbonado: Number(e.target.value) || 0 }))}
-                      />
-                    </div>
+                    {orderForm.tipoCliente !== 'EMPRESA' ? (
+                      <div className="formGroup">
+                        <label>Abono Inicial del Pago</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={orderForm.montoAbonado}
+                          onChange={(e) => setOrderForm(prev => ({ ...prev, montoAbonado: Number(e.target.value) || 0 }))}
+                        />
+                      </div>
+                    ) : (
+                      <div className="formGroup">
+                        <label>Número de Orden de Compra (OC)</label>
+                        <input
+                          type="text"
+                          value={orderForm.numeroOrdenCompra || ''}
+                          placeholder="Ej. OC-2026-9842"
+                          onChange={(e) => handleFormChange('numeroOrdenCompra', e.target.value)}
+                          required
+                        />
+                      </div>
+                    )}
                   </div>
 
                   <button className="btn btnPrimary" type="submit" style={{ width: '100%', marginTop: '0.5rem' }}>
