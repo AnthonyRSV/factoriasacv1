@@ -99,6 +99,7 @@ model OrdenesFabricacion {
   tokenConsulta          String            @unique @default(uuid())
   creadoEn               DateTime          @default(now())
   actualizadoEn          DateTime          @updatedAt
+  numeroOrdenCompra      String?
   detalles               DetalleOrden[]
   procesos               ProcesoEtapa[]
   salidaAutorizada       SalidaAutorizada?
@@ -115,10 +116,11 @@ model DetalleOrden {
   ordenId             String
   productoId          String?
   productoComercialId String?
-  largo               Float
-  ancho               Float
-  espesor             Float
-  forma               String
+  largo               Float?
+  ancho               Float?
+  espesor             Float?
+  forma               String?
+  descripcionProducto String?
   calidadAcero        String
   colorPintura        String?
   tuercasTipo         String?

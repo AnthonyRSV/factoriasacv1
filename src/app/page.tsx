@@ -153,17 +153,15 @@ export default function Home() {
   // Form States
   const [orderForm, setOrderForm] = useState({
     clienteNombre: '',
-    tipoCliente: 'TIENDA',
+    tipoCliente: 'TIENDA' as 'TIENDA' | 'EMPRESA',
     fechaComprometida: '',
     montoTotal: 0,
     montoAbonado: 0,
     metodoPago: 'EFECTIVO',
     esUrgente: false,
     productoId: '',
-    largo: 0.5,
-    ancho: 0.25,
-    espesor: 0.01,
-    forma: 'Rectangular',
+    descripcionProducto: '',
+    numeroOrdenCompra: '',
     calidadAcero: 'A36',
     colorPintura: 'Ninguno',
     tuercasTipo: 'Ninguno',
@@ -173,7 +171,8 @@ export default function Home() {
   const [restockForm, setRestockForm] = useState({
     materiaPrimaId: '',
     cantidad: 50,
-    distribuidor: 'Ansec',
+    tipoMovimiento: 'INGRESO',
+    motivo: '',
   });
 
   const [userForm, setUserForm] = useState({
@@ -341,24 +340,9 @@ export default function Home() {
     const p = fichas.find(ft => ft.id === orderForm.productoId);
     if (!p) return { qty: 0, unit: 'metros', material: '' };
 
-    let qty = 0;
-    const formulaObj = JSON.parse(p.formulaCalculo);
-    let formulaStr = formulaObj.formula.toLowerCase();
-
-    formulaStr = formulaStr.replace(/largo/g, orderForm.largo.toString());
-    formulaStr = formulaStr.replace(/ancho/g, orderForm.ancho.toString());
-    formulaStr = formulaStr.replace(/cantidad/g, orderForm.cantidadSolicitada.toString());
-    formulaStr = formulaStr.replace(/espesor/g, orderForm.espesor.toString());
-
-    try {
-      qty = new Function(`return ${formulaStr}`)();
-    } catch (e) {
-      qty = Number(orderForm.largo) * Number(orderForm.cantidadSolicitada);
-    }
-
     return {
-      qty: parseFloat(qty.toFixed(2)),
-      unit: formulaObj.unit || 'metros',
+      qty: 0,
+      unit: 'metros',
       material: p.materiaPrima ? p.materiaPrima.nombre : 'Insumo',
     };
   };
@@ -369,37 +353,28 @@ export default function Home() {
   const handleFormChange = (field: string, value: any) => {
     setOrderForm(prev => {
       const updated = { ...prev, [field]: value };
-
-      // Auto-pricing rules
-      let basePrice = 20; // 20 soles per item
-      if (updated.productoId) {
-        const selectedFt = fichas.find(f => f.id === updated.productoId);
-        if (selectedFt?.codigo === 'PROD-UBOLT-58') basePrice = 30;
-        if (selectedFt?.codigo === 'PROD-ABRA-38') basePrice = 45;
-        if (selectedFt?.codigo === 'PROD-MUELLE-ESP') basePrice = 80;
-      }
-
+      
+      let basePrice = 20; 
       const subtotal = basePrice * updated.cantidadSolicitada;
 
-      // Add-ons surcharges
       let extra = 0;
       if (updated.colorPintura && updated.colorPintura !== 'Ninguno') extra += 5 * updated.cantidadSolicitada;
       if (updated.tuercasTipo && updated.tuercasTipo !== 'Ninguno') extra += 8 * updated.cantidadSolicitada;
 
       updated.montoTotal = subtotal + extra;
 
-      // If external client is selected, default to paying 50% abono
-      if (updated.clienteNombre.toLowerCase() !== 'tienda') {
+      if (updated.tipoCliente === 'EMPRESA') {
+        updated.montoAbonado = 0;
+      } else if (updated.clienteNombre.toLowerCase() !== 'tienda') {
         updated.montoAbonado = parseFloat((updated.montoTotal * 0.50).toFixed(2));
       } else {
-        updated.montoAbonado = updated.montoTotal; // store clients pay 100%
+        updated.montoAbonado = updated.montoTotal;
       }
 
       return updated;
     });
   };
 
-  // Check workshop capacity to notify seller about extra costs (RF-10)
   const isWorkshopAtCapacity = orders.filter(o => o.estado === 'APROBADA').length >= 5;
 
   // ----------------------------------------------------
@@ -424,6 +399,11 @@ export default function Home() {
       return;
     }
 
+    if (orderForm.tipoCliente === 'EMPRESA' && !orderForm.numeroOrdenCompra) {
+      setFormError('Para clientes corporativos (Empresa), debe ingresar el Número de Orden de Compra (OC).');
+      return;
+    }
+
     try {
       const payload = {
         clienteNombre: orderForm.clienteNombre,
@@ -433,12 +413,10 @@ export default function Home() {
         montoAbonado: orderForm.montoAbonado,
         metodoPago: orderForm.metodoPago,
         esUrgente: orderForm.esUrgente,
+        numeroOrdenCompra: orderForm.tipoCliente === 'EMPRESA' ? orderForm.numeroOrdenCompra : undefined,
         detalles: [{
           productoId: orderForm.productoId,
-          largo: Number(orderForm.largo),
-          ancho: Number(orderForm.ancho),
-          espesor: Number(orderForm.espesor),
-          forma: orderForm.forma,
+          descripcionProducto: orderForm.descripcionProducto,
           calidadAcero: orderForm.calidadAcero,
           colorPintura: orderForm.colorPintura !== 'Ninguno' ? orderForm.colorPintura : undefined,
           tuercasTipo: orderForm.tuercasTipo !== 'Ninguno' ? orderForm.tuercasTipo : undefined,
@@ -456,7 +434,6 @@ export default function Home() {
       if (res.ok) {
         setFormSuccess(`Orden #${result.codigoCorrelativoUnico} creada exitosamente. Estado: ${result.estado}.`);
         loadData();
-        // Reset form
         setOrderForm({
           clienteNombre: '',
           tipoCliente: 'TIENDA',
@@ -466,10 +443,8 @@ export default function Home() {
           metodoPago: 'EFECTIVO',
           esUrgente: false,
           productoId: '',
-          largo: 0.5,
-          ancho: 0.25,
-          espesor: 0.01,
-          forma: 'Rectangular',
+          descripcionProducto: '',
+          numeroOrdenCompra: '',
           calidadAcero: 'A36',
           colorPintura: 'Ninguno',
           tuercasTipo: 'Ninguno',
@@ -571,17 +546,18 @@ export default function Home() {
         body: JSON.stringify({
           materiaPrimaId: restockForm.materiaPrimaId,
           cantidad: Number(restockForm.cantidad),
-          motivo: `Ingreso mensual de material. Distribuidor: ${restockForm.distribuidor}`,
+          tipoMovimiento: restockForm.tipoMovimiento,
+          motivo: restockForm.motivo || (restockForm.tipoMovimiento === 'EGRESO' ? 'Consumo manual en taller' : 'Ingreso manual de material'),
         }),
       });
 
       if (res.ok) {
-        setFormSuccess(`Se ingresaron ${restockForm.cantidad} unidades de ${selectedMat.nombre} exitosamente.`);
+        setFormSuccess(`Movimiento de ${restockForm.tipoMovimiento === 'EGRESO' ? 'Salida' : 'Ingreso'} registrado con éxito para ${selectedMat.nombre}.`);
         loadData();
-        setRestockForm(prev => ({ ...prev, materiaPrimaId: '' }));
+        setRestockForm({ materiaPrimaId: '', cantidad: 50, tipoMovimiento: 'INGRESO', motivo: '' });
       } else {
         const err = await res.json();
-        setFormError(err.error || 'Error al reabastecer.');
+        setFormError(err.error || 'Error al actualizar inventario.');
       }
     } catch (err: any) {
       setFormError(err.message || 'Error de red.');
@@ -758,7 +734,6 @@ export default function Home() {
   if (!currentUser) {
     return (
       <div className={styles.authScreen}>
-        {/* Left Side: Representative Image */}
         <div className={styles.authHero}>
           <div className={styles.authHeroCard}>
             <h2 style={{ color: '#1d4ed8', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -771,7 +746,6 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Right Side: Login Form */}
         <div className={styles.authFormWrap}>
           <div className={styles.authCard}>
             <div style={{ textAlign: 'center', marginBottom: '2.5rem' }}>
@@ -841,14 +815,12 @@ export default function Home() {
               </button>
             </form>
             
-            {/* Divider */}
             <div className={styles.dividerCompact} style={{ display: 'flex', alignItems: 'center', gap: '1rem', margin: '1.5rem 0' }}>
               <div style={{ flex: 1, height: '1px', background: '#e2e8f0' }} />
               <span style={{ color: '#64748b', fontSize: '0.85rem', fontWeight: 500 }}>o inicia sesión con</span>
               <div style={{ flex: 1, height: '1px', background: '#e2e8f0' }} />
             </div>
             
-            {/* Google Sign In Button */}
             <button
               onClick={() => signIn('google')}
               style={{
@@ -870,7 +842,6 @@ export default function Home() {
               onMouseOver={(e) => { e.currentTarget.style.background = '#f8fafc'; }}
               onMouseOut={(e) => { e.currentTarget.style.background = 'white'; }}
             >
-              {/* Google G Icon */}
               <svg width="20" height="20" viewBox="0 0 48 48">
                 <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
                 <path fill="#34A853" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.32 7.09-17.65z" />
@@ -924,16 +895,11 @@ export default function Home() {
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.875rem', marginBottom: '0.5rem' }}>
               <img src="/logo.png" alt="Logo Factoría Sánchez" style={{ height: '40px', width: 'auto', objectFit: 'contain' }} onError={(e) => { 
                 e.currentTarget.style.display = 'none'; 
-                // Fallback to Factory icon if logo not found
-                const fallback = document.createElement('div');
-                fallback.innerHTML = '<div style="width:40px;height:40px;display:flex;align-items:center;justify-content:center;background:#4F46E5;border-radius:8px;color:white;font-size:18px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"></path><path d="M3 7h18"></path><path d="M5 7l1 14"></path><path d="M19 7l-1 14"></path><path d="M8 7l1 14"></path><path d="M16 7l-1 14"></path><path d="M12 3l-1 4"></path><path d="M12 3l1 4"></path><path d="M9 11h6"></path><path d="M9 15h6"></path></svg></div>';
-                e.currentTarget.parentNode?.insertBefore(fallback, e.currentTarget.nextSibling);
               }} />
               <h1 style={{ fontSize: '1.125rem', fontWeight: 700, margin: 0, color: '#1E293B' }}>Factoría Sánchez</h1>
             </div>
             <p style={{ fontSize: '0.75rem', color: '#64748B', margin: 0, paddingLeft: '3rem' }}>Sistema de Gestión</p>
           </div>
-          {/* Mobile close button */}
           <button 
             onClick={() => setIsMobileSidebarOpen(false)}
             style={{
@@ -1121,7 +1087,6 @@ export default function Home() {
 
       {/* Main Content */}
       <main style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#F8FAFC', overflow: 'hidden' }}>
-        {/* Top bar with hamburger menu */}
         <div style={{
           display: 'flex',
           alignItems: 'center',
@@ -1146,7 +1111,6 @@ export default function Home() {
           >
             <Menu size={20} strokeWidth={2} />
           </button>
-          {/* Mobile logo and name in top bar */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
             <img src="/logo.png" alt="Logo Factoría Sánchez" style={{ height: '32px', width: 'auto', objectFit: 'contain' }} onError={(e) => { e.currentTarget.style.display = 'none'; }} />
             <div style={{ display: 'flex', flexDirection: 'column' }}>
@@ -1156,9 +1120,7 @@ export default function Home() {
           </div>
         </div>
         
-        {/* Content Area */}
         <div style={{ flex: 1, padding: '2rem', overflow: 'auto' }}>
-          {/* Header Area */}
           <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
             <div>
               <h2 style={{ margin: 0, fontSize: '1.75rem', color: '#1e293b' }}>
@@ -1179,7 +1141,6 @@ export default function Home() {
             </div>
           </header>
 
-        {/* Global Notifications */}
         {formError && (
           <div style={{
             display: 'flex',
@@ -1213,12 +1174,8 @@ export default function Home() {
           </div>
         )}
 
-        {/* ----------------------------------------------------
-            TAB: DASHBOARD (Admin View)
-            ---------------------------------------------------- */}
         {activeTab === 'dashboard' && (
           <div>
-            {/* Stats Cards */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
               <div style={{ 
                 background: '#FFFFFF', 
@@ -1358,7 +1315,6 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Recent Orders */}
             <div style={{ 
               background: '#FFFFFF', 
               padding: '1.25rem', 
@@ -1416,9 +1372,6 @@ export default function Home() {
           </div>
         )}
 
-        {/* ----------------------------------------------------
-            TAB: USUARIOS (Admin View)
-            ---------------------------------------------------- */}
         {activeTab === 'users' && (
           <div style={{ 
             background: '#FFFFFF', 
@@ -1564,9 +1517,6 @@ export default function Home() {
           </div>
         )}
 
-        {/* ----------------------------------------------------
-            TAB: ORDERS (Seller & Admin View)
-            ---------------------------------------------------- */}
         {activeTab === 'orders' && (
           <div className="tabContent">
             <div className="card">
@@ -1686,9 +1636,6 @@ export default function Home() {
           </div>
         )}
 
-        {/* ----------------------------------------------------
-            TAB: NEW ORDER (Seller View)
-            ---------------------------------------------------- */}
         {activeTab === 'new_order' && (
           <div className="tabContent">
             <div className="grid2">
@@ -1717,6 +1664,30 @@ export default function Home() {
                     </div>
                   </div>
 
+                  {orderForm.tipoCliente === 'EMPRESA' && (
+                    <div className="formGroup" style={{ marginBottom: '1rem' }}>
+                      <label>Número de Orden de Compra (OC)</label>
+                      <input
+                        type="text"
+                        value={orderForm.numeroOrdenCompra || ''}
+                        placeholder="Ej. OC-2026-9842"
+                        onChange={(e) => handleFormChange('numeroOrdenCompra', e.target.value)}
+                        required
+                      />
+                    </div>
+                  )}
+
+                  <div className="formGroup" style={{ marginBottom: '1rem' }}>
+                    <label>Descripción del Producto (Medidas y Forma)</label>
+                    <input
+                      type="text"
+                      value={orderForm.descripcionProducto || ''}
+                      placeholder="Ej. Abrazadera forma cuadrada de 3/4 x 3 x 16 o Media redonda 1/2 x 2 x 10"
+                      onChange={(e) => handleFormChange('descripcionProducto', e.target.value)}
+                      required
+                    />
+                  </div>
+
                   <div className="formGroup">
                     <label>Producto de Ficha Técnica</label>
                     <select
@@ -1730,47 +1701,7 @@ export default function Home() {
                     </select>
                   </div>
 
-                  {/* Physical specs (RF-02) */}
                   <div className="formRow">
-                    <div className="formGroup">
-                      <label>Largo (m)</label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={orderForm.largo}
-                        onChange={(e) => handleFormChange('largo', parseFloat(e.target.value) || 0)}
-                      />
-                    </div>
-                    <div className="formGroup">
-                      <label>Ancho (m)</label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={orderForm.ancho}
-                        onChange={(e) => handleFormChange('ancho', parseFloat(e.target.value) || 0)}
-                      />
-                    </div>
-                    <div className="formGroup">
-                      <label>Espesor (pulg/mm)</label>
-                      <input
-                        type="number"
-                        step="0.001"
-                        value={orderForm.espesor}
-                        onChange={(e) => handleFormChange('espesor', parseFloat(e.target.value) || 0)}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="formRow">
-                    <div className="formGroup">
-                      <label>Forma Física</label>
-                      <input
-                        type="text"
-                        value={orderForm.forma}
-                        placeholder="Ej. U-Form / Circular"
-                        onChange={(e) => handleFormChange('forma', e.target.value)}
-                      />
-                    </div>
                     <div className="formGroup">
                       <label>Calidad del Acero</label>
                       <select
@@ -1780,7 +1711,16 @@ export default function Home() {
                         <option value="A36">A36 (Acero Dulce)</option>
                         <option value="1045">1045 (Medio Carbono)</option>
                         <option value="BCL">BCL (Muelle Especial)</option>
+                        <option value="Fierro">Fierro Común</option>
                       </select>
+                    </div>
+                    <div className="formGroup">
+                      <label>Cantidad Solicitada</label>
+                      <input
+                        type="number"
+                        value={orderForm.cantidadSolicitada}
+                        onChange={(e) => handleFormChange('cantidadSolicitada', parseInt(e.target.value) || 0)}
+                      />
                     </div>
                   </div>
 
@@ -1803,23 +1743,13 @@ export default function Home() {
                     </div>
                   </div>
 
-                  <div className="formRow">
-                    <div className="formGroup">
-                      <label>Cantidad Solicitada</label>
-                      <input
-                        type="number"
-                        value={orderForm.cantidadSolicitada}
-                        onChange={(e) => handleFormChange('cantidadSolicitada', parseInt(e.target.value) || 0)}
-                      />
-                    </div>
-                    <div className="formGroup">
-                      <label>Fecha Prometida de Entrega</label>
-                      <input
-                        type="date"
-                        value={orderForm.fechaComprometida}
-                        onChange={(e) => handleFormChange('fechaComprometida', e.target.value)}
-                      />
-                    </div>
+                  <div className="formGroup">
+                    <label>Fecha Prometida de Entrega</label>
+                    <input
+                      type="date"
+                      value={orderForm.fechaComprometida}
+                      onChange={(e) => handleFormChange('fechaComprometida', e.target.value)}
+                    />
                   </div>
 
                   <div className="formRow" style={{ alignItems: 'center', margin: '0.5rem 0 1rem' }}>
@@ -1844,7 +1774,6 @@ export default function Home() {
 
                   <hr style={{ borderColor: 'var(--border-color)', margin: '1rem 0' }} />
 
-                  {/* Payment policies (RF-06) */}
                   <div className="formRow">
                     <div className="formGroup">
                       <label>Precio Total Calculado</label>
@@ -1864,16 +1793,6 @@ export default function Home() {
                         onChange={(e) => setOrderForm(prev => ({ ...prev, montoAbonado: Number(e.target.value) || 0 }))}
                       />
                     </div>
-                    <div className="formGroup">
-                      <label>Método de Pago</label>
-                      <select
-                        value={orderForm.metodoPago}
-                        onChange={(e) => handleFormChange('metodoPago', e.target.value)}
-                      >
-                        <option value="EFECTIVO">Efectivo en Tienda</option>
-                        <option value="TRANSFERENCIA_BANCARIA">Transferencia / Bancarizado</option>
-                      </select>
-                    </div>
                   </div>
 
                   <button className="btn btnPrimary" type="submit" style={{ width: '100%', marginTop: '0.5rem' }}>
@@ -1882,43 +1801,24 @@ export default function Home() {
                 </form>
               </div>
 
-              {/* Live Preview (RF-11) */}
               <div className="card" style={{ alignSelf: 'start' }}>
                 <h3>Ficha Técnica & Cálculo de Material</h3>
-                <p style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginBottom: '1rem' }}>Cálculo automático según dimensiones ingresadas en tiempo real</p>
-
                 {orderForm.productoId ? (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.8rem' }}>
                     <div style={{ background: 'rgba(255,255,255,0.03)', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
-                      <span style={{ fontSize: '0.75rem', color: 'var(--color-secondary)', fontWeight: 'bold', textTransform: 'uppercase' }}>Fórmula Asociada:</span>
-                      <p style={{ fontSize: '1rem', color: 'var(--color-text-primary)', margin: '0.2rem 0' }}>
-                        {orderForm.productoId && JSON.parse(fichas.find(f => f.id === orderForm.productoId)?.formulaCalculo || '{}').formula}
+                      <span style={{ fontSize: '0.75rem', color: 'var(--color-secondary)', fontWeight: 'bold', textTransform: 'uppercase' }}>Producto Seleccionado:</span>
+                      <p style={{ fontSize: '1.15rem', color: 'var(--color-text-primary)', margin: '0.2rem 0', fontWeight: 'bold' }}>
+                        {fichas.find(f => f.id === orderForm.productoId)?.nombre}
                       </p>
-                      <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>
-                        {orderForm.productoId && JSON.parse(fichas.find(f => f.id === orderForm.productoId)?.formulaCalculo || '{}').desc}
-                      </span>
                     </div>
 
-                    <div style={{ padding: '1rem 0' }}>
-                      <span style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>Materia prima requerida:</span>
-                      <p style={{ fontSize: '1.25rem', fontWeight: 'bold', color: 'var(--color-accent)' }}>{matPreview.material}</p>
-                    </div>
-
-                    <div style={{ display: 'flex', justifyContent: 'space-between', background: 'rgba(99,102,241,0.05)', padding: '1rem', borderRadius: '8px', border: '1px solid rgba(99,102,241,0.2)' }}>
-                      <div>
-                        <span style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>Total material a descontar:</span>
-                        <p style={{ fontSize: '1.5rem', fontWeight: 800, color: 'var(--color-primary)' }}>{matPreview.qty} {matPreview.unit}</p>
-                      </div>
-                      <div style={{ alignSelf: 'center', fontSize: '2rem' }}>📐</div>
-                    </div>
-
-                    <div className="alertBanner alertBannerInfo" style={{ fontSize: '0.8rem', padding: '0.6rem', margin: 0 }}>
-                      <span>💡 <strong>Deducción Transaccional:</strong> Este material será debitado automáticamente de la tabla <code>materia_prima</code> y registrado en el Kardex al aprobarse la orden.</span>
+                    <div className="alertBanner alertBannerInfo" style={{ fontSize: '0.85rem', padding: '0.8rem', margin: 0 }}>
+                      <span>📋 La orden será procesada mediante el código y registrado en el Kardex al aprobarse la orden.</span>
                     </div>
                   </div>
                 ) : (
                   <div style={{ textAlign: 'center', padding: '3rem 0', color: 'var(--color-text-muted)' }}>
-                    <span>Seleccione un producto en la cotización izquierda para visualizar la ficha técnica automatizada.</span>
+                    <span>Seleccione un producto para visualizar la ficha técnica.</span>
                   </div>
                 )}
               </div>
@@ -1926,86 +1826,33 @@ export default function Home() {
           </div>
         )}
 
-        {/* ----------------------------------------------------
-            TAB: PRODUCTION LINE / KANBAN (Workshop view)
-            ---------------------------------------------------- */}
         {activeTab === 'production' && (
           <div className="tabContent">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
-              <h3>Organizador Diario de Fabricación (Jefe de Planta)</h3>
-              <span style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>Filtro: Ordenado por Urgencia y Fecha Comprometida</span>
+              <h3>Organizador Diario de Fabricación</h3>
+              <span style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>Filtro: Ordenado por Urgencia</span>
             </div>
 
-            {/* Kanban representation of orders */}
             <div className="kanbanBoard">
               {['PENDIENTE_PAGO', 'APROBADA', 'TERMINADA', 'ENTREGADA', 'CANCELADA'].map((status) => {
                 const colOrders = orders
                   .filter(o => o.estado === status)
-                  .sort((a, b) => {
-                    if (a.esUrgente && !b.esUrgente) return -1;
-                    if (!a.esUrgente && b.esUrgente) return 1;
-                    return new Date(a.fechaComprometida).getTime() - new Date(b.fechaComprometida).getTime();
-                  });
+                  .sort((a, b) => new Date(a.fechaComprometida).getTime() - new Date(b.fechaComprometida).getTime());
 
                 return (
                   <div key={status} className="kanbanColumn">
                     <div className="kanbanColHeader">
-                      <span className="kanbanColTitle">
-                        {status === 'PENDIENTE_PAGO' ? '⏳ Espera Abono' :
-                          status === 'APROBADA' ? '🚀 Fabricación' :
-                            status === 'TERMINADA' ? '📦 Completadas' :
-                              status === 'ENTREGADA' ? '✅ Entregado' : '❌ Cancelado'}
-                      </span>
+                      <span className="kanbanColTitle">{status}</span>
                       <span className="kanbanCount">{colOrders.length}</span>
                     </div>
 
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', minHeight: '300px' }}>
-                      {colOrders.length === 0 ? (
-                        <div style={{ border: '2px dashed var(--border-color)', borderRadius: '8px', padding: '2rem 1rem', textAlign: 'center', color: 'var(--color-text-muted)', fontSize: '0.8rem' }}>
-                          Sin órdenes
+                      {colOrders.map(o => (
+                        <div key={o.id} className="kanbanCard" onClick={() => setSelectedOrder(o)}>
+                          <span style={{ fontSize: '0.8rem', fontWeight: 'bold' }}>Orden #{o.codigoCorrelativoUnico}</span>
+                          <p style={{ fontSize: '0.85rem' }}>{o.clienteNombre}</p>
                         </div>
-                      ) : (
-                        colOrders.map(o => (
-                          <div
-                            key={o.id}
-                            className={`kanbanCard ${o.esUrgente ? 'kanbanCardUrgente' : ''}`}
-                            onClick={() => setSelectedOrder(o)}
-                          >
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '0.4rem' }}>
-                              <span style={{ fontSize: '0.8rem', fontWeight: 'bold' }}>Orden #{o.codigoCorrelativoUnico}</span>
-                              <span style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)' }}>{new Date(o.fechaComprometida).toLocaleDateString('es-PE')}</span>
-                            </div>
-
-                            <p style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--color-text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                              {o.clienteNombre}
-                            </p>
-
-                            <div style={{ margin: '0.4rem 0', fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
-                              {o.detalles && o.detalles[0] ? (
-                                <span>{o.detalles[0].cantidadSolicitada}x {o.detalles[0].producto.nombre}</span>
-                              ) : 'Sin especificaciones'}
-                            </div>
-
-                            {/* RF-07: Process stages completed display */}
-                            {o.estado === 'APROBADA' && o.procesos && (
-                              <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '0.5rem', marginTop: '0.5rem' }}>
-                                <div style={{ display: 'flex', gap: '0.25rem', alignItems: 'center' }}>
-                                  {o.procesos.map((stage: any) => (
-                                    <span
-                                      key={stage.id}
-                                      className={getStageDotClass(stage)}
-                                      title={`${stage.etapaNombre}: ${stage.completada ? 'Completado' : 'Pendiente'}`}
-                                    />
-                                  ))}
-                                  <span style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', marginLeft: '0.2rem' }}>
-                                    {o.procesos.filter((p: any) => p.completada).length}/4 Etapas
-                                  </span>
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        ))
-                      )}
+                      ))}
                     </div>
                   </div>
                 );
@@ -2014,9 +1861,6 @@ export default function Home() {
           </div>
         )}
 
-        {/* ----------------------------------------------------
-            TAB: MATERIA PRIMA CRUD
-            ---------------------------------------------------- */}
         {activeTab === 'materia_prima' && (
           <div className="tabContent">
             <div className="card">
@@ -2043,30 +1887,8 @@ export default function Home() {
                       <input type="text" required value={mpForm.nombre} onChange={e => setMpForm({...mpForm, nombre: e.target.value})} placeholder="Ej: Acero Inoxidable 304" />
                     </div>
                     <div className="formGroup">
-                      <label>Tipo</label>
-                      <select value={mpForm.tipo} onChange={e => setMpForm({...mpForm, tipo: e.target.value})}>
-                        <option value="VARILLA">VARILLA</option>
-                        <option value="PLATINA">PLATINA</option>
-                        <option value="MUELLE">MUELLE</option>
-                        <option value="TUERCA">TUERCA</option>
-                        <option value="ARANDELA">ARANDELA</option>
-                      </select>
-                    </div>
-                    <div className="formGroup">
-                      <label>Diámetro (opcional)</label>
-                      <input type="text" value={mpForm.diametro} onChange={e => setMpForm({...mpForm, diametro: e.target.value})} placeholder='Ej: 1/2"' />
-                    </div>
-                    <div className="formGroup">
-                      <label>Espesor (opcional)</label>
-                      <input type="text" value={mpForm.espesor} onChange={e => setMpForm({...mpForm, espesor: e.target.value})} placeholder='Ej: 1/4"' />
-                    </div>
-                    <div className="formGroup">
                       <label>Stock Actual</label>
                       <input type="number" step="0.01" required value={mpForm.stockActual} onChange={e => setMpForm({...mpForm, stockActual: parseFloat(e.target.value) || 0})} />
-                    </div>
-                    <div className="formGroup">
-                      <label>Stock Mínimo</label>
-                      <input type="number" step="0.01" required value={mpForm.stockMinimo} onChange={e => setMpForm({...mpForm, stockMinimo: parseFloat(e.target.value) || 0})} />
                     </div>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1.5rem' }}>
@@ -2081,29 +1903,21 @@ export default function Home() {
                     <tr>
                       <th>Código</th>
                       <th>Nombre</th>
-                      <th>Tipo</th>
-                      <th>Stock Actual</th>
-                      <th>Mínimo</th>
-                      <th style={{ width: '80px', textAlign: 'center' }}>Acciones</th>
+                      <th>Stock</th>
+                      <th>Acciones</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {materials.filter(m => !m.codigo.startsWith('COM-')).map(mp => (
+                    {materials.map(mp => (
                       <tr key={mp.id}>
                         <td><code>{mp.codigo}</code></td>
-                        <td><strong>{mp.nombre}</strong><br/><span style={{fontSize:'0.75rem', color: 'var(--color-text-muted)'}}>{mp.diametro ? `Ø ${mp.diametro}` : ''} {mp.espesor ? `Esp. ${mp.espesor}` : ''}</span></td>
-                        <td><span className="badge">{mp.tipo}</span></td>
+                        <td>{mp.nombre}</td>
                         <td>{mp.stockActual}</td>
-                        <td>{mp.stockMinimo}</td>
-                        <td style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center' }}>
-                          <button onClick={() => handleEditMPClick(mp)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-primary)' }} title="Editar"><Edit size={16}/></button>
-                          <button onClick={() => handleDeleteMP(mp.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-danger)' }} title="Eliminar"><Trash2 size={16}/></button>
+                        <td>
+                          <button onClick={() => handleEditMPClick(mp)} className="btn btnSecondary" style={{ fontSize: '0.75rem', padding: '0.2rem 0.4rem' }}>Editar</button>
                         </td>
                       </tr>
                     ))}
-                    {materials.filter(m => !m.codigo.startsWith('COM-')).length === 0 && (
-                      <tr><td colSpan={6} style={{ textAlign: 'center', padding: '2rem' }}>No hay materia prima registrada.</td></tr>
-                    )}
                   </tbody>
                 </table>
               </div>
@@ -2111,9 +1925,6 @@ export default function Home() {
           </div>
         )}
 
-        {/* ----------------------------------------------------
-            TAB: DUAL INVENTORY (Almacenero, Jefe, Admin view)
-            ---------------------------------------------------- */}
         {activeTab === 'inventory' && (
           <div className="tabContent">
             <div className="card">
@@ -2123,168 +1934,63 @@ export default function Home() {
                   style={{
                     background: 'none', border: 'none', fontSize: '1rem', fontWeight: 600, cursor: 'pointer',
                     color: inventorySubTab === 'produccion' ? 'var(--color-primary)' : 'var(--color-text-secondary)',
-                    borderBottom: inventorySubTab === 'produccion' ? '2px solid var(--color-primary)' : 'none',
-                    paddingBottom: '0.5rem', marginBottom: '-0.65rem'
                   }}
                 >
-                  Insumos (Producción)
-                </button>
-                <button
-                  onClick={() => setInventorySubTab('comercial')}
-                  style={{
-                    background: 'none', border: 'none', fontSize: '1rem', fontWeight: 600, cursor: 'pointer',
-                    color: inventorySubTab === 'comercial' ? 'var(--color-primary)' : 'var(--color-text-secondary)',
-                    borderBottom: inventorySubTab === 'comercial' ? '2px solid var(--color-primary)' : 'none',
-                    paddingBottom: '0.5rem', marginBottom: '-0.65rem'
-                  }}
-                >
-                  Comercial (Venta Directa)
+                  Insumos
                 </button>
               </div>
 
               {inventorySubTab === 'produccion' && (
-                <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
-                    <h3 style={{ margin: 0 }}>Inventario de Insumos (Producción)</h3>
-                    <span style={{ fontSize: '0.75rem', background: 'rgba(99,102,241,0.1)', color: 'var(--color-primary)', padding: '0.2rem 0.5rem', borderRadius: '4px', fontWeight: 'bold' }}>Control de Materia Prima</span>
-                  </div>
-
-                  <div className="tableContainer">
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>Código</th>
-                          <th>Nombre / Descripción</th>
-                          <th>Tipo</th>
-                          <th>Medidas</th>
-                          <th>Stock Actual</th>
-                          <th>Mínimo</th>
-                          <th>Estado</th>
+                <div className="tableContainer">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Código</th>
+                        <th>Nombre</th>
+                        <th>Stock Actual</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {materials.map((mat) => (
+                        <tr key={mat.id}>
+                          <td><code>{mat.codigo}</code></td>
+                          <td>{mat.nombre}</td>
+                          <td><strong>{mat.stockActual.toFixed(2)}</strong></td>
                         </tr>
-                      </thead>
-                      <tbody>
-                        {materials.filter(m => !m.codigo.startsWith('COM-')).map((mat) => {
-                          const isLow = mat.stockActual <= mat.stockMinimo;
-                          return (
-                            <tr key={mat.id} className={isLow ? 'stockLow' : ''}>
-                              <td><code>{mat.codigo}</code></td>
-                              <td><strong>{mat.nombre}</strong></td>
-                              <td><span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--color-text-secondary)' }}>{mat.tipo}</span></td>
-                              <td>
-                                {mat.diametro ? `Ø ${mat.diametro}"` : ''}
-                                {mat.espesor ? ` Esp. ${mat.espesor}"` : ''}
-                                {!mat.diametro && !mat.espesor ? 'N/A' : ''}
-                              </td>
-                              <td><strong>{mat.stockActual.toFixed(2)}</strong></td>
-                              <td>{mat.stockMinimo.toFixed(2)}</td>
-                              <td>
-                                {isLow ? (
-                                  <span className="badge" style={{ background: 'rgba(239, 68, 68, 0.2)', color: 'var(--color-danger)', fontWeight: 'bold' }}>Alerta Minimo</span>
-                                ) : (
-                                  <span className="badge" style={{ background: 'rgba(16, 185, 129, 0.2)', color: 'var(--color-success)' }}>Suficiente</span>
-                                )}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-
-              {inventorySubTab === 'comercial' && (
-                <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
-                    <h3 style={{ margin: 0 }}>Inventario Comercial (Venta Directa)</h3>
-                    <span style={{ fontSize: '0.75rem', background: 'rgba(20, 184, 166, 0.1)', color: 'var(--color-accent)', padding: '0.2rem 0.5rem', borderRadius: '4px', fontWeight: 'bold' }}>Productos Estandarizados</span>
-                  </div>
-
-                  <div className="tableContainer">
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>Código</th>
-                          <th>Nombre Producto</th>
-                          <th>Stock Tienda</th>
-                          <th>Mínimo</th>
-                          <th>Estado</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {materials.filter(m => m.codigo.startsWith('COM-')).map((mat) => {
-                          const isLow = mat.stockActual <= mat.stockMinimo;
-                          return (
-                            <tr key={mat.id} className={isLow ? 'stockLow' : ''}>
-                              <td><code>{mat.codigo}</code></td>
-                              <td><strong>{mat.nombre}</strong></td>
-                              <td><strong>{mat.stockActual.toFixed(2)}</strong></td>
-                              <td>{mat.stockMinimo.toFixed(2)}</td>
-                              <td>
-                                {isLow ? (
-                                  <span className="badge" style={{ background: 'rgba(239, 68, 68, 0.2)', color: 'var(--color-danger)' }}>Bajo</span>
-                                ) : (
-                                  <span className="badge" style={{ background: 'rgba(16, 185, 129, 0.2)', color: 'var(--color-success)' }}>Disponible</span>
-                                )}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               )}
             </div>
           </div>
         )}
 
-        {/* ----------------------------------------------------
-            TAB: KARDEX MOVEMENTS (Almacenero view)
-            ---------------------------------------------------- */}
         {activeTab === 'kardex' && (
           <div className="tabContent">
             <div className="card">
-              <h3>Libro del Kardex de Inventario</h3>
-              <p style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginBottom: '1.25rem' }}>Historial transaccional auditable de movimientos en el almacén</p>
-
+              <h3>Libro del Kardex</h3>
               <div className="tableContainer">
                 <table>
                   <thead>
                     <tr>
-                      <th>Fecha Registro</th>
-                      <th>Material / Insumo</th>
-                      <th>Movimiento</th>
+                      <th>Fecha</th>
+                      <th>Material</th>
+                      <th>Tipo</th>
                       <th>Cantidad</th>
-                      <th>Motivo del Registro</th>
-                      <th>Usuario Encargado</th>
+                      <th>Motivo</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {kardex.length === 0 ? (
-                      <tr>
-                        <td colSpan={6} style={{ textAlign: 'center', color: 'var(--color-text-muted)' }}>No hay registros de inventario.</td>
+                    {kardex.map((kdx) => (
+                      <tr key={kdx.id}>
+                        <td>{new Date(kdx.creadoEn).toLocaleString('es-PE')}</td>
+                        <td>{kdx.materiaPrima?.nombre}</td>
+                        <td>{kdx.tipoMovimiento}</td>
+                        <td>{kdx.cantidad}</td>
+                        <td>{kdx.motivo}</td>
                       </tr>
-                    ) : (
-                      kardex.map((kdx) => (
-                        <tr key={kdx.id}>
-                          <td>{new Date(kdx.creadoEn).toLocaleString('es-PE')}</td>
-                          <td>
-                            <strong>{kdx.materiaPrima?.nombre}</strong>
-                            <br />
-                            <code style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>{kdx.materiaPrima?.codigo}</code>
-                          </td>
-                          <td>
-                            <span className={`badge ${kdx.tipoMovimiento === 'INGRESO' ? 'badgeEntregada' : 'badgeCancelada'}`}>
-                              {kdx.tipoMovimiento}
-                            </span>
-                          </td>
-                          <td><strong>{kdx.cantidad}</strong></td>
-                          <td>{kdx.motivo}</td>
-                          <td>{kdx.usuario ? kdx.usuario.name : 'Sistema (Automático)'}</td>
-                        </tr>
-                      ))
-                    )}
+                    ))}
                   </tbody>
                 </table>
               </div>
@@ -2292,156 +1998,92 @@ export default function Home() {
           </div>
         )}
 
-        {/* ----------------------------------------------------
-            TAB: RESTOCK PURCHASE (Almacenero view)
-            ---------------------------------------------------- */}
         {activeTab === 'restock' && (
           <div className="tabContent">
             <div className="card" style={{ maxWidth: '600px', margin: '0 auto' }}>
-              <h3>Registrar Ingreso de Compra Mensual</h3>
-              <p style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginBottom: '1.25rem' }}>Actualiza el stock e inserta la trazabilidad en la auditoría del Kardex</p>
-
+              <h3>Registrar Movimiento de Inventario</h3>
               <form onSubmit={handleRestockSubmit}>
                 <div className="formGroup">
-                  <label>Materia Prima / Insumo</label>
+                  <label>Materia Prima</label>
                   <select
                     value={restockForm.materiaPrimaId}
                     onChange={(e) => setRestockForm(prev => ({ ...prev, materiaPrimaId: e.target.value }))}
+                    required
                   >
-                    <option value="">-- Seleccionar Item --</option>
+                    <option value="">-- Seleccionar --</option>
                     {materials.map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.nombre} (Stock actual: {m.stockActual})
-                      </option>
+                      <option key={m.id} value={m.id}>{m.nombre}</option>
                     ))}
                   </select>
                 </div>
 
                 <div className="formGroup">
-                  <label>Cantidad Adquirida</label>
+                  <label>Tipo de Movimiento</label>
+                  <select
+                    value={restockForm.tipoMovimiento}
+                    onChange={(e) => setRestockForm(prev => ({ ...prev, tipoMovimiento: e.target.value }))}
+                  >
+                    <option value="INGRESO">Ingreso</option>
+                    <option value="EGRESO">Egreso</option>
+                  </select>
+                </div>
+
+                <div className="formGroup">
+                  <label>Cantidad</label>
                   <input
                     type="number"
+                    step="0.01"
                     value={restockForm.cantidad}
                     onChange={(e) => setRestockForm(prev => ({ ...prev, cantidad: Number(e.target.value) || 0 }))}
+                    required
                   />
                 </div>
 
                 <div className="formGroup">
-                  <label>Distribuidor Proveedor</label>
-                  <select
-                    value={restockForm.distribuidor}
-                    onChange={(e) => setRestockForm(prev => ({ ...prev, distribuidor: e.target.value }))}
-                  >
-                    <option value="Ansec">Ansec S.A.C.</option>
-                    <option value="Metal Mark">Metal Mark</option>
-                    <option value="Comercial RC">Comercial RC</option>
-                  </select>
+                  <label>Motivo</label>
+                  <input
+                    type="text"
+                    value={restockForm.motivo}
+                    onChange={(e) => setRestockForm(prev => ({ ...prev, motivo: e.target.value }))}
+                    required
+                  />
                 </div>
 
                 <button className="btn btnPrimary" type="submit" style={{ width: '100%', marginTop: '0.5rem' }}>
-                  Guardar en Almacén & Log Kardex
+                  Registrar
                 </button>
               </form>
             </div>
           </div>
         )}
 
-        {/* ----------------------------------------------------
-            TAB: ADMIN TECHNICAL REPORTS (Admin view)
-            ---------------------------------------------------- */}
         {activeTab === 'reports' && reports && (
           <div className="tabContent">
             <div className="grid3" style={{ marginBottom: '1.5rem' }}>
-              <div className="card metricCard">
-                <span className="metricTitle">Órdenes Pendientes</span>
-                <p className="metricValue">{reports.pendingOrdersCount}</p>
-                <p style={{ fontSize: '0.8rem' }}>En cola y fabricación activa</p>
-              </div>
-              <div className="card metricCard">
-                <span className="metricTitle">Órdenes Entregadas</span>
-                <p className="metricValue" style={{ color: 'var(--color-success)' }}>{reports.deliveredOrdersCount}</p>
-                <p style={{ fontSize: '0.8rem' }}>Facturadas y despachadas</p>
-              </div>
-              <div className="card metricCard">
-                <span className="metricTitle">Velocidad Promedio</span>
-                <p className="metricValue" style={{ color: 'var(--color-secondary)' }}>
-                  {reports.avgHours > 0 ? `${reports.avgHours} hrs` : '0.0 hrs'}
-                </p>
-                <p style={{ fontSize: '0.8rem' }}>Desde creación hasta entrega</p>
-              </div>
-            </div>
-
-            <div className="grid2">
-              {/* Product rankings chart */}
               <div className="card">
-                <h3>Ranking de Productos Más Fabricados</h3>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '1.25rem' }}>
-                  {reports.ranking && reports.ranking.length === 0 ? (
-                    <p style={{ color: 'var(--color-text-muted)' }}>No hay datos suficientes.</p>
-                  ) : (
-                    reports.ranking?.map((item: any) => (
-                      <div key={item.name}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '0.25rem' }}>
-                          <span>{item.name}</span>
-                          <strong>{item.value} unidades</strong>
-                        </div>
-                        <div style={{ width: '100%', height: '8px', background: 'rgba(255,255,255,0.05)', borderRadius: '4px', overflow: 'hidden' }}>
-                          <div style={{ height: '100%', background: 'linear-gradient(90deg, var(--color-primary), var(--color-secondary))', width: `${Math.min(100, (item.value / 150) * 100)}%` }} />
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-
-              {/* Material consumption ranking */}
-              <div className="card">
-                <h3>Consumo Detallado de Materia Prima (Kardex)</h3>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '1.25rem' }}>
-                  {reports.consumption && reports.consumption.length === 0 ? (
-                    <p style={{ color: 'var(--color-text-muted)' }}>No hay movimientos de egreso aún.</p>
-                  ) : (
-                    reports.consumption?.map((item: any) => (
-                      <div key={item.name}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '0.25rem' }}>
-                          <span>{item.name}</span>
-                          <strong>{item.value.toFixed(1)} metros</strong>
-                        </div>
-                        <div style={{ width: '100%', height: '8px', background: 'rgba(255,255,255,0.05)', borderRadius: '4px', overflow: 'hidden' }}>
-                          <div style={{ height: '100%', background: 'linear-gradient(90deg, var(--color-accent), #2dd4bf)', width: `${Math.min(100, (item.value / 200) * 100)}%` }} />
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
+                <h3>Pendientes</h3>
+                <p>{reports.pendingOrdersCount}</p>
               </div>
             </div>
           </div>
         )}
 
-        {/* ----------------------------------------------------
-            TAB: PRODUCCIÓN (Admin & Jefe Taller view)
-            ---------------------------------------------------- */}
         {activeTab === 'produccion' && (
           <div className="tabContent">
-            {/* Internal Tabs for Production Module */}
             <div className="roleSelectorBar" style={{ marginBottom: '2rem' }}>
               <button
                 onClick={() => setProductionActiveTab('calendario')}
                 className={`roleBtn ${productionActiveTab === 'calendario' ? 'roleBtnActive' : ''}`}
               >
-                <Calendar size={18} strokeWidth={2} style={{ marginRight: '0.5rem' }} />
-                Calendario de Producción
+                Calendario
               </button>
               <button
                 onClick={() => setProductionActiveTab('seguimiento')}
                 className={`roleBtn ${productionActiveTab === 'seguimiento' ? 'roleBtnActive' : ''}`}
               >
-                <ListOrdered size={18} strokeWidth={2} style={{ marginRight: '0.5rem' }} />
-                Seguimiento de Órdenes
+                Seguimiento
               </button>
             </div>
-
             {productionActiveTab === 'calendario' ? (
               <CalendarioProduccion />
             ) : (
@@ -2450,9 +2092,6 @@ export default function Home() {
           </div>
         )}
 
-        {/* ----------------------------------------------------
-            OVERLAY / SIMULATED MODAL: ORDER DETAILS
-            ---------------------------------------------------- */}
         {selectedOrder && (
           <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(0,0,0,0.8)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, padding: '1.5rem' }}>
             <div className="card" style={{ maxWidth: '650px', width: '100%', maxHeight: '90vh', overflowY: 'auto' }}>
@@ -2460,199 +2099,37 @@ export default function Home() {
                 <h4>Ficha de Producción: Orden #{selectedOrder.codigoCorrelativoUnico}</h4>
                 <button className="btn btnSecondary" style={{ padding: '0.25rem 0.5rem' }} onClick={() => setSelectedOrder(null)}>✕ Cerrar</button>
               </div>
-
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem', fontSize: '0.9rem', marginBottom: '1.25rem' }}>
-                <div style={{ flex: '1 1 200px' }}>
-                  <p><strong>Cliente:</strong> {selectedOrder.clienteNombre} ({selectedOrder.tipoCliente})</p>
-                  <p><strong>Fecha Comprometida:</strong> {new Date(selectedOrder.fechaComprometida).toLocaleDateString('es-PE')}</p>
-                  <p><strong>Monto Facturado:</strong> S/. {selectedOrder.montoTotal} {selectedOrder.cargoUrgencia > 0 && `(Inc. recargo S/. ${selectedOrder.cargoUrgencia} por urgencia)`}</p>
-                  <p><strong>Monto Abonado:</strong> S/. {selectedOrder.montoAbonado}</p>
+              <p><strong>Cliente:</strong> {selectedOrder.clienteNombre}</p>
+              {selectedOrder.detalles?.map((d: any, idx: number) => (
+                <div key={idx}>
+                  <p><strong>Producto:</strong> {d.producto?.nombre}</p>
+                  <p><strong>Descripción:</strong> {d.descripcionProducto}</p>
                 </div>
-                <div style={{ flex: '1 1 200px' }}>
-                  <p><strong>Metodo Pago:</strong> {selectedOrder.metodoPago}</p>
-                  <p><strong>Estado:</strong> <span className="badge badgeAprobada" style={{ padding: '0.1rem 0.4rem' }}>{selectedOrder.estado}</span></p>
-                  <p><strong>Fecha Registro:</strong> {new Date(selectedOrder.creadoEn).toLocaleString()}</p>
-                  <p><strong>Autorización de Salida:</strong> {selectedOrder.salidaAutorizada ? `✅ Autorizado por ${selectedOrder.salidaAutorizada.jefeTaller?.name}` : '❌ Pendiente Autorizar'}</p>
-                </div>
-              </div>
-
-              {/* Physical specifications */}
-              <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '1rem', marginBottom: '1.25rem' }}>
-                <h5 style={{ marginBottom: '0.5rem' }}>Detalle de Producto</h5>
-                {selectedOrder.detalles?.map((d: any) => (
-                  <div key={d.id} style={{ fontSize: '0.85rem', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
-                    <p><strong>Producto:</strong> {d.producto?.nombre}</p>
-                    <p><strong>Cantidad:</strong> {d.cantidadSolicitada} unidades</p>
-                    <p><strong>Largo:</strong> {d.largo} m</p>
-                    <p><strong>Ancho:</strong> {d.ancho} m</p>
-                    <p><strong>Espesor:</strong> {d.espesor} pulg/mm</p>
-                    <p><strong>Calidad Acero:</strong> {d.calidadAcero}</p>
-                    {d.colorPintura && <p><strong>Pintura:</strong> {d.colorPintura}</p>}
-                    {d.tuercasTipo && <p><strong>Tuercas:</strong> {d.tuercasTipo}</p>}
-                  </div>
-                ))}
-              </div>
-
-              {/* Process line (RF-07) */}
-              {selectedOrder.estado !== 'PENDIENTE_PAGO' && selectedOrder.procesos && (
-                <div style={{ marginBottom: '1.25rem' }}>
-                  <h5 style={{ marginBottom: '0.5rem' }}>Línea de Proceso y Operarios</h5>
-                  <div className="progressList">
-                    {selectedOrder.procesos.map((stage: any) => {
-                      const isJefe = currentUser.role === 'JEFE_TALLER' || currentUser.role === 'ADMIN';
-                      return (
-                        <div key={stage.id} className={`progressItem ${stage.completada ? 'progressItemDone' : ''}`}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                            <span className={getStageDotClass(stage)} />
-                            <span><strong>{stage.etapaNombre}</strong> (Paso {stage.ordenSecuencia})</span>
-                          </div>
-
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                            {stage.completada ? (
-                              <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
-                                Realizado por: <strong>{stage.operarioAsignado || 'Operario'}</strong>
-                              </span>
-                            ) : isJefe ? (
-                              <div style={{ display: 'flex', gap: '0.25rem' }}>
-                                <input
-                                  type="text"
-                                  placeholder="Operario"
-                                  value={stageOperario[stage.id] || stage.operarioAsignado || ''}
-                                  onChange={(e) => setStageOperario(prev => ({ ...prev, [stage.id]: e.target.value }))}
-                                  style={{ padding: '0.2rem 0.4rem', fontSize: '0.75rem', width: '100px' }}
-                                />
-                                <button
-                                  className="btn btnSuccess"
-                                  style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }}
-                                  onClick={() => handleUpdateStage(stage.id, selectedOrder, true)}
-                                >
-                                  Listo
-                                </button>
-                              </div>
-                            ) : (
-                              <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Pendiente</span>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {/* Modify Order Form (RF-03: Vendedor or Jefe) */}
-              {(currentUser.role === 'VENDEDOR' || currentUser.role === 'JEFE_TALLER') && (
-                <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '1rem', marginTop: '1rem' }}>
-                  <h5 style={{ marginBottom: '0.5rem' }}>Modificar Parámetros de Orden</h5>
-                  <div className="formRow" style={{ gap: '0.5rem' }}>
-                    <div className="formGroup" style={{ flex: 1 }}>
-                      <label style={{ fontSize: '0.75rem' }}>Color Pintura</label>
-                      <input
-                        type="text"
-                        id="modColor"
-                        defaultValue={selectedOrder.detalles?.[0]?.colorPintura || ''}
-                        style={{ padding: '0.4rem', fontSize: '0.8rem' }}
-                      />
-                    </div>
-                    <div className="formGroup" style={{ flex: 1 }}>
-                      <label style={{ fontSize: '0.75rem' }}>Tuercas/Accesorios</label>
-                      <input
-                        type="text"
-                        id="modNuts"
-                        defaultValue={selectedOrder.detalles?.[0]?.tuercasTipo || ''}
-                        style={{ padding: '0.4rem', fontSize: '0.8rem' }}
-                      />
-                    </div>
-                    <div className="formGroup" style={{ flex: 1 }}>
-                      <label style={{ fontSize: '0.75rem' }}>Fecha Entrega</label>
-                      <input
-                        type="date"
-                        id="modDate"
-                        defaultValue={selectedOrder.fechaComprometida ? selectedOrder.fechaComprometida.substring(0, 10) : ''}
-                        style={{ padding: '0.4rem', fontSize: '0.8rem' }}
-                      />
-                    </div>
-                  </div>
-                  <button
-                    className="btn btnSecondary"
-                    style={{ width: '100%', padding: '0.5rem', fontSize: '0.85rem' }}
-                    onClick={() => {
-                      const colorEl = document.getElementById('modColor') as HTMLInputElement;
-                      const nutsEl = document.getElementById('modNuts') as HTMLInputElement;
-                      const dateEl = document.getElementById('modDate') as HTMLInputElement;
-                      handleModifyOrder(selectedOrder.id, colorEl.value, nutsEl.value, dateEl.value);
-                    }}
-                  >
-                    Guardar Cambios
-                  </button>
-                </div>
-              )}
-
-              {/* Physical release authorization triggers (RF-15) */}
-              {currentUser.role === 'JEFE_TALLER' && selectedOrder.estado === 'APROBADA' && !selectedOrder.salidaAutorizada && (
-                <div style={{ background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.2)', padding: '1rem', borderRadius: '8px', marginTop: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div style={{ fontSize: '0.8rem' }}>
-                    <strong>Autorizar Salida del Almacén</strong>
-                    <p style={{ margin: 0, color: 'var(--color-text-secondary)' }}>Firma la entrega de varillas/insumos al taller de metalúrgica.</p>
-                  </div>
-                  <button className="btn btnSuccess" onClick={() => handleAuthorizeRelease(selectedOrder.id)}>
-                    ✍️ Autorizar Salida
-                  </button>
-                </div>
-              )}
+              ))}
             </div>
           </div>
         )}
 
-        {/* ----------------------------------------------------
-            OVERLAY / SIMULATED MODAL: CLIENT SECURE LINK VIEW
-            ---------------------------------------------------- */}
         {activeExternalToken && externalOrderData && (
           <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(5,8,16,0.95)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 2000, padding: '1.5rem' }}>
             <div className="card" style={{ maxWidth: '600px', width: '100%', border: '1px solid var(--color-accent)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.8rem', marginBottom: '1rem' }}>
-                <div>
-                  <h4 style={{ color: 'var(--color-accent)' }}>Consulta de Estado Externa</h4>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Visualización Segura para Clientes (Sin Login)</span>
-                </div>
+                <h4>Consulta de Estado Externa</h4>
                 <button className="btn btnSecondary" style={{ padding: '0.25rem 0.5rem' }} onClick={() => { setActiveExternalToken(null); setExternalOrderData(null); }}>✕ Salir</button>
               </div>
 
               <h3>{externalOrderData.clienteNombre}</h3>
-              <p style={{ marginBottom: '1rem' }}>Seguimiento de Órden de Fabricación: <strong>Orden #{externalOrderData.codigoCorrelativoUnico}</strong></p>
-
-              <div style={{ display: 'flex', justifyContent: 'space-between', background: 'rgba(255,255,255,0.03)', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginBottom: '1.5rem' }}>
-                <div>
-                  <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>Compromiso Entrega</span>
-                  <p style={{ fontWeight: 'bold' }}>{new Date(externalOrderData.fechaComprometida).toLocaleDateString('es-PE')}</p>
-                </div>
-                <div>
-                  <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>Estado Actual</span>
-                  <br />
-                  <span className={`badge ${externalOrderData.estado === 'PENDIENTE_PAGO' ? 'badgePendiente' :
-                    externalOrderData.estado === 'APROBADA' ? 'badgeAprobada' :
-                      externalOrderData.estado === 'TERMINADA' ? 'badgeTerminada' :
-                        externalOrderData.estado === 'ENTREGADA' ? 'badgeEntregada' : 'badgeCancelada'
-                    }`}>
-                    {externalOrderData.estado}
-                  </span>
-                </div>
-              </div>
-
-              {/* Order products list */}
-              <h5 style={{ marginBottom: '0.5rem' }}>Productos Solicitados</h5>
+              <p>Orden #{externalOrderData.codigoCorrelativoUnico}</p>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1.5rem' }}>
                 {externalOrderData.detalles?.map((d: any, idx: number) => (
                   <div key={idx} style={{ background: 'rgba(255,255,255,0.02)', padding: '0.75rem 1rem', borderRadius: '6px', fontSize: '0.85rem' }}>
                     <p style={{ fontWeight: 'bold', color: 'white' }}>{d.cantidadSolicitada}x {d.productoNombre}</p>
                     <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.8rem', margin: '0.2rem 0 0' }}>
-                      Especificaciones: Largo {d.largo}m, Ancho {d.ancho}m, Espesor {d.espesor}mm, Estructura: {d.forma}
+                      {d.descripcionProducto ? `Descripción: ${d.descripcionProducto}` : `Especificaciones: Largo ${d.largo}m, Ancho ${d.ancho}m, Espesor ${d.espesor}mm, Estructura: ${d.forma}`}
                     </p>
                   </div>
                 ))}
               </div>
-
-              {/* Real-time stages */}
               <h5 style={{ marginBottom: '0.5rem' }}>Avance de la Fabricación en Taller</h5>
               <div className="progressList">
                 {externalOrderData.procesos?.length > 0 ? (

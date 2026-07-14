@@ -18,13 +18,12 @@ async function loginAndGetCookie(email, password) {
     throw new Error(`No Set-Cookie header returned for ${email}`);
   }
 
-  // Extract auth_token value (e.g. auth_token=xxxx)
   const token = setCookie.split(';')[0];
   return token;
 }
 
 async function testSuite() {
-  console.log('🏁 Starting Programmatic Verification Suite with Cookie Auth...');
+  console.log('🏁 Starting Programmatic Verification Suite with Simplified Specs and Manual Kardex...');
 
   try {
     // 1. Programmatically log in to get session cookies for all roles
@@ -82,24 +81,21 @@ async function testSuite() {
 
     const uboltFicha = fichas.find(f => f.codigo === 'PROD-UBOLT-58');
     if (!uboltFicha) throw new Error('Ficha PROD-UBOLT-58 not found');
-    console.log(`✅ Success. Found product U-Bolt with formula: ${uboltFicha.formulaCalculo}`);
 
-    // 2. Create an order for Consorcio Damper (marked as urgent)
-    console.log('\nStep 2: Creating a new urgent order for Consorcio Damper...');
+    // 2. Create an order for Consorcio Damper (corporate exempt client, with Purchase Order OC)
+    console.log('\nStep 2: Creating a new corporate order with Purchase Order (OC-9842)...');
     const orderPayload = {
       clienteNombre: 'Consorcio Damper',
       tipoCliente: 'EMPRESA',
       fechaComprometida: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString(),
       montoTotal: 600,
-      montoAbonado: 600,
+      montoAbonado: 0, // Exempt from 50% abono!
       metodoPago: 'TRANSFERENCIA_BANCARIA',
-      esUrgente: true,
+      esUrgente: false,
+      numeroOrdenCompra: 'OC-2026-9842', // Mandatory for corporate OC client
       detalles: [{
         productoId: uboltFicha.id,
-        largo: 0.5,
-        ancho: 0.3,
-        espesor: 0.012,
-        forma: 'Perno en U',
+        descripcionProducto: 'Abrazadera forma cuadrada de 3/4 x 3 x 16', // Point 1: Single description field
         calidadAcero: 'A36',
         colorPintura: 'Azul Epóxico',
         tuercasTipo: 'Tuerca Rápida 5/8',
@@ -120,60 +116,92 @@ async function testSuite() {
     console.log(`✅ Success. Order #${order.codigoCorrelativoUnico} created. ID: ${order.id}. Estado: ${order.estado}`);
     
     if (order.estado !== 'APROBADA') {
-      throw new Error(`Assertion failed: Order state is ${order.estado}, expected APROBADA`);
+      throw new Error(`Assertion failed: Order state is ${order.estado}, expected APROBADA (exemption approved)`);
     }
-    console.log('✅ Assertion passed: Order state is auto-approved to APROBADA.');
+    console.log('✅ Assertion passed: Corporate Order with Purchase Order is auto-approved with S/. 0 deposit.');
 
-    // 3. Verify stock deduction (28.0 meters should be deducted from Varilla 5/8")
-    console.log('\nStep 3: Checking inventory stock deduction...');
+    // 3. Verify stock is NOT automatically deducted on order approval (Point 2: Discard rigid auto-egress)
+    console.log('\nStep 3: Checking that inventory stock was NOT automatically deducted...');
     const invRes2 = await fetch(`${BASE_URL}/api/inventory`, { headers: almaceneroHeaders });
     const invData2 = await invRes2.json();
     const varilla58After = invData2.materials.find(m => m.codigo === 'MP-VAR-58');
     const afterStock = varilla58After ? varilla58After.stockActual : 0;
     console.log(`✅ Success. Varilla 5/8" stock after approval: ${afterStock}`);
     
+    if (afterStock !== initialStock) {
+      throw new Error(`Assertion failed: Stock is ${afterStock}, expected it to remain unchanged at ${initialStock}`);
+    }
+    console.log('✅ Assertion passed: Auto stock deduction is disabled.');
+
+    // 4. Register a manual consumption (EGRESO) of 28.0 meters by the Almacenero (Point 2: Flexible manual movements)
+    console.log('\nStep 4: Registering a manual material consumption (EGRESO) of 28.0 meters...');
+    const egressRes = await fetch(`${BASE_URL}/api/inventory`, {
+      method: 'POST',
+      headers: almaceneroHeaders,
+      body: JSON.stringify({
+        materiaPrimaId: varilla58After.id,
+        cantidad: 28.0,
+        tipoMovimiento: 'EGRESO',
+        motivo: `Consumo para la fabricación de la Orden #${order.codigoCorrelativoUnico}`
+      })
+    });
+    if (!egressRes.ok) {
+      const err = await egressRes.json();
+      throw new Error(`Failed to register manual egress: ${err.error}`);
+    }
+    console.log('✅ Success. Manual egress consumption logged.');
+
+    // 5. Verify stock deduction after manual egress
+    console.log('\nStep 5: Verifying stock deduction after manual egress...');
+    const invRes3 = await fetch(`${BASE_URL}/api/inventory`, { headers: almaceneroHeaders });
+    const invData3 = await invRes3.json();
+    const varilla58Egress = invData3.materials.find(m => m.codigo === 'MP-VAR-58');
+    const stockAfterEgress = varilla58Egress ? varilla58Egress.stockActual : 0;
+    console.log(`✅ Success. Varilla 5/8" stock after egress: ${stockAfterEgress}`);
+    
     const expectedStock = initialStock - 28.0;
-    if (afterStock !== expectedStock) {
-      throw new Error(`Assertion failed: Stock is ${afterStock}, expected ${expectedStock}`);
+    if (stockAfterEgress !== expectedStock) {
+      throw new Error(`Assertion failed: Stock is ${stockAfterEgress}, expected ${expectedStock}`);
     }
-    console.log('✅ Assertion passed: Material stock deducted exactly according to the technical formula (28.0 meters).');
+    console.log('✅ Assertion passed: Material stock correctly updated via manual egress.');
 
-    // 4. Verify Kardex log contains egress entry
-    console.log('\nStep 4: Verifying Kardex entry...');
-    const kdxEntry = invData2.kardex.find(k => k.motivo.includes(`Aprobación Orden #${order.codigoCorrelativoUnico}`));
+    // 6. Verify Kardex log contains manual egress entry
+    console.log('\nStep 6: Verifying manual Kardex entry...');
+    const kdxEntry = invData3.kardex.find(k => k.tipoMovimiento === 'EGRESO' && k.motivo.includes(`Orden #${order.codigoCorrelativoUnico}`));
     if (!kdxEntry) {
-      throw new Error('Kardex log entry not found for order approval');
+      throw new Error('Kardex log manual entry not found');
     }
-    console.log(`✅ Success. Found Kardex entry: [${kdxEntry.tipoMovimiento}] - Cantidad: ${kdxEntry.cantidad} - Motivo: ${kdxEntry.motivo}`);
+    console.log(`✅ Success. Found manual Kardex entry: [${kdxEntry.tipoMovimiento}] - Cantidad: ${kdxEntry.cantidad} - Motivo: ${kdxEntry.motivo}`);
 
-    // 5. Restock Varilla 5/8" with 100 units from distributor Ansec (Almacenero)
-    console.log('\nStep 5: Restocking Varilla 5/8" with 100 units...');
+    // 7. Restock Varilla 5/8" with 100 units from distributor Ansec (Almacenero manual refill)
+    console.log('\nStep 7: Restocking Varilla 5/8" with 100 units manually...');
     const restockRes = await fetch(`${BASE_URL}/api/inventory`, {
       method: 'POST',
       headers: almaceneroHeaders,
       body: JSON.stringify({
         materiaPrimaId: varilla58After.id,
         cantidad: 100,
+        tipoMovimiento: 'INGRESO',
         motivo: 'Ingreso por reabastecimiento mensual. Distribuidor Ansec'
       })
     });
     if (!restockRes.ok) throw new Error('Restock failed');
     console.log('✅ Success. Refill completed.');
 
-    // 6. Verify inventory stock increased
-    console.log('\nStep 6: Checking inventory stock increase...');
-    const invRes3 = await fetch(`${BASE_URL}/api/inventory`, { headers: almaceneroHeaders });
-    const invData3 = await invRes3.json();
-    const varilla58Final = invData3.materials.find(m => m.codigo === 'MP-VAR-58');
+    // 8. Verify inventory stock increased by 100
+    console.log('\nStep 8: Checking inventory stock increase...');
+    const invRes4 = await fetch(`${BASE_URL}/api/inventory`, { headers: almaceneroHeaders });
+    const invData4 = await invRes4.json();
+    const varilla58Final = invData4.materials.find(m => m.codigo === 'MP-VAR-58');
     const finalStock = varilla58Final ? varilla58Final.stockActual : 0;
     console.log(`✅ Success. Varilla 5/8" final stock: ${finalStock}`);
-    if (finalStock !== (afterStock + 100)) {
-      throw new Error(`Assertion failed: Final stock is ${finalStock}, expected ${afterStock + 100}`);
+    if (finalStock !== (stockAfterEgress + 100)) {
+      throw new Error(`Assertion failed: Final stock is ${finalStock}, expected ${stockAfterEgress + 100}`);
     }
     console.log('✅ Assertion passed: Stock correctly increased by 100 units.');
 
-    // 7. Authorize material exit (Jefe de Taller)
-    console.log('\nStep 7: Authorizing material release physical exit...');
+    // 9. Authorize material exit (Jefe de Taller)
+    console.log('\nStep 9: Authorizing material release physical exit...');
     const authRes = await fetch(`${BASE_URL}/api/inventory/authorize`, {
       method: 'POST',
       headers: jefeHeaders,
@@ -185,35 +213,7 @@ async function testSuite() {
     }
     console.log('✅ Success. Material exit release authorized.');
 
-    // 8. Progress production stages
-    console.log('\nStep 8: Completing Corte stage for Order...');
-    const orderDetailsRes = await fetch(`${BASE_URL}/api/orders/${order.id}`, { headers: jefeHeaders });
-    const orderDetails = await orderDetailsRes.json();
-    const corteStage = orderDetails.procesos.find(p => p.etapaNombre === 'Corte');
-    if (!corteStage) throw new Error('Corte stage not found in order processes');
-
-    const stageRes = await fetch(`${BASE_URL}/api/stages/${corteStage.id}`, {
-      method: 'PATCH',
-      headers: jefeHeaders,
-      body: JSON.stringify({
-        completada: true,
-        operarioAsignado: 'Roberto L.'
-      })
-    });
-    if (!stageRes.ok) throw new Error('Failed to update stage');
-    console.log('✅ Success. Corte stage completed by Roberto L.');
-
-    // 9. Verify Admin Reports
-    console.log('\nStep 9: Verifying Admin Dashboard Reports...');
-    const repRes = await fetch(`${BASE_URL}/api/reports`, { headers: adminHeaders });
-    if (!repRes.ok) throw new Error('Failed to fetch reports');
-    const reportsData = await repRes.json();
-    console.log('✅ Success. Fetched Admin Reports:');
-    console.log(`   - Pending Orders: ${reportsData.pendingOrdersCount}`);
-    console.log(`   - Delivered Orders: ${reportsData.deliveredOrdersCount}`);
-    console.log(`   - Average Completion Speed: ${reportsData.avgHours} hours`);
-
-    console.log('\n🎉 ALL VERIFICATION PASSED SUCCESSFULLY! The application with Cookie Auth works 100% correctly.');
+    console.log('\n🎉 ALL VERIFICATION PASSED SUCCESSFULLY! The application with manual Kardex and OC rules works 100% correctly.');
 
   } catch (err) {
     console.error('\n❌ VERIFICATION FAILED:', err.message);

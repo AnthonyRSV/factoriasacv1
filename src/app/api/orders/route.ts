@@ -54,7 +54,7 @@ export async function POST(req: NextRequest) {
     if (!authResult.authorized) return authResult.errorResponse!;
 
     const body = await req.json();
-    const { clienteNombre, tipoCliente, fechaComprometida, fechaProduccion, montoTotal, montoAbonado, metodoPago, esUrgente, prioridad, detalles } = body;
+    const { clienteNombre, tipoCliente, fechaComprometida, fechaProduccion, montoTotal, montoAbonado, metodoPago, esUrgente, prioridad, detalles, numeroOrdenCompra } = body;
 
     // Validation
     if (!clienteNombre || !tipoCliente || !fechaComprometida || montoTotal === undefined || montoAbonado === undefined || !metodoPago || !detalles || detalles.length === 0) {
@@ -71,12 +71,14 @@ export async function POST(req: NextRequest) {
       metodoPago,
       esUrgente: !!esUrgente,
       prioridad,
+      numeroOrdenCompra,
       detalles: detalles.map((d: any) => ({
         productoId: d.productoId,
-        largo: Number(d.largo),
-        ancho: Number(d.ancho),
-        espesor: Number(d.espesor),
+        largo: d.largo !== undefined && d.largo !== null ? Number(d.largo) : undefined,
+        ancho: d.ancho !== undefined && d.ancho !== null ? Number(d.ancho) : undefined,
+        espesor: d.espesor !== undefined && d.espesor !== null ? Number(d.espesor) : undefined,
         forma: d.forma,
+        descripcionProducto: d.descripcionProducto,
         calidadAcero: d.calidadAcero,
         colorPintura: d.colorPintura,
         tuercasTipo: d.tuercasTipo,

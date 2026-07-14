@@ -385,12 +385,14 @@ export async function createOrder(data: {
   metodoPago: string;
   esUrgente: boolean;
   prioridad?: PrioridadOrden;
+  numeroOrdenCompra?: string;
   detalles: Array<{
     productoId: string;
-    largo: number;
-    ancho: number;
-    espesor: number;
-    forma: string;
+    largo?: number;
+    ancho?: number;
+    espesor?: number;
+    forma?: string;
+    descripcionProducto?: string;
     calidadAcero: string;
     colorPintura?: string;
     tuercasTipo?: string;
@@ -401,7 +403,9 @@ export async function createOrder(data: {
 
   // Validate Payment rules (RF-06)
   // Exception: Damper (or other big companies) auto approves and is exempt from 50% check.
-  const isCorporateExempt = data.clienteNombre.toLowerCase().includes('damper');
+  // Also, if they provide a Purchase Order (numeroOrdenCompra), they are exempt!
+  const hasPurchaseOrder = !!data.numeroOrdenCompra;
+  const isCorporateExempt = data.clienteNombre.toLowerCase().includes('damper') || hasPurchaseOrder;
 
   if (!isCorporateExempt) {
     const minAbonado = data.montoTotal * 0.50;
@@ -426,12 +430,11 @@ export async function createOrder(data: {
   // Set the initial status based on payment or client type
   let initialStatus: EstadoOrden = EstadoOrden.PENDIENTE_PAGO;
   if (isCorporateExempt) {
-    initialStatus = EstadoOrden.APROBADA; // Auto-approved
+    initialStatus = EstadoOrden.APROBADA; // Auto-approved due to corporate exemption or Purchase Order
   } else if (data.montoAbonado >= data.montoTotal) {
     initialStatus = EstadoOrden.APROBADA; // Paid in full
   } else if (data.montoAbonado >= (data.montoTotal * 0.50)) {
     // For normal external clients, a 50% deposit lets it be approved or stay in PENDIENTE_PAGO depending on policy.
-    // Let's approve it if they hit the 50% threshold to allow workflow progression.
     initialStatus = EstadoOrden.APROBADA;
   }
 
@@ -453,6 +456,7 @@ export async function createOrder(data: {
           esUrgente: data.esUrgente,
           prioridad: data.prioridad || PrioridadOrden.NORMAL,
           cargoUrgencia: cargoUrgencia,
+          numeroOrdenCompra: data.numeroOrdenCompra,
         },
       });
 
@@ -462,10 +466,11 @@ export async function createOrder(data: {
           data: {
             ordenId: order.id,
             productoId: d.productoId,
-            largo: d.largo,
-            ancho: d.ancho,
-            espesor: d.espesor,
-            forma: d.forma,
+            largo: d.largo ?? null,
+            ancho: d.ancho ?? null,
+            espesor: d.espesor ?? null,
+            forma: d.forma ?? null,
+            descripcionProducto: d.descripcionProducto ?? null,
             calidadAcero: d.calidadAcero,
             colorPintura: d.colorPintura,
             tuercasTipo: d.tuercasTipo,
@@ -507,6 +512,7 @@ export async function createOrder(data: {
       esUrgente: data.esUrgente,
       cargoUrgencia: cargoUrgencia,
       tokenConsulta: `token-${orderId}`,
+      numeroOrdenCompra: data.numeroOrdenCompra || null,
       creadoEn: new Date().toISOString(),
       actualizadoEn: new Date().toISOString(),
     };
@@ -518,10 +524,11 @@ export async function createOrder(data: {
         id: `det-${Date.now()}-${index}`,
         ordenId: orderId,
         productoId: d.productoId,
-        largo: d.largo,
-        ancho: d.ancho,
-        espesor: d.espesor,
-        forma: d.forma,
+        largo: d.largo ?? null,
+        ancho: d.ancho ?? null,
+        espesor: d.espesor ?? null,
+        forma: d.forma ?? null,
+        descripcionProducto: d.descripcionProducto || null,
         calidadAcero: d.calidadAcero,
         colorPintura: d.colorPintura || null,
         tuercasTipo: d.tuercasTipo || null,
@@ -558,64 +565,9 @@ async function getActiveOrdersCount(): Promise<number> {
   }
 }
 
-// Side effects executed transactionally when order transitions to APPROVED (stock check, kardex egress, process lines)
+// Side effects executed transactionally when order transitions to APPROVED (process lines setup)
 async function executeApprovalSideEffects(ordenId: string, tx: any) {
-  // 1. Get details of the order
-  const details = await tx.detalleOrden.findMany({
-    where: { ordenId },
-    include: { producto: true },
-  });
-
-  const order = await tx.ordenesFabricacion.findUnique({
-    where: { id: ordenId },
-  });
-
-  // System user for automation
-  const systemUser = await tx.user.findFirst({ where: { role: Role.ALMACENERO } });
-  const userId = systemUser ? systemUser.id : 'system';
-
-  // 2. Perform Stock deduction for each product via formulas (RF-11, RF-12)
-  for (const d of details) {
-    const formulaJson = JSON.parse(d.producto.formulaCalculo);
-    // Solve formula dynamically based on DB field (RF-11)
-    let formulaStr = formulaJson.formula.toLowerCase();
-    formulaStr = formulaStr.replace(/largo/g, d.largo.toString());
-    formulaStr = formulaStr.replace(/ancho/g, d.ancho.toString());
-    formulaStr = formulaStr.replace(/cantidad/g, d.cantidadSolicitada.toString());
-    formulaStr = formulaStr.replace(/espesor/g, d.espesor.toString());
-    
-    let calculatedQty = 0;
-    try {
-      calculatedQty = new Function(`return ${formulaStr}`)();
-    } catch (e) {
-      calculatedQty = d.largo * d.cantidadSolicitada;
-    }
-
-    // Deduct stock in PostgreSQL
-    const mat = await tx.materiaPrima.findUnique({ where: { id: d.producto.materiaPrimaId } });
-    if (mat) {
-      const nextStock = mat.stockActual - calculatedQty;
-      
-      // Update Materia Prima
-      await tx.materiaPrima.update({
-        where: { id: mat.id },
-        data: { stockActual: nextStock },
-      });
-
-      // Write Kardex record (EGRESO)
-      await tx.kardexInventario.create({
-        data: {
-          materiaPrimaId: mat.id,
-          tipoMovimiento: TipoMovimiento.EGRESO,
-          cantidad: calculatedQty,
-          motivo: `Descuento automático: Aprobación Orden #${order.codigoCorrelativoUnico}`,
-          usuarioId: userId,
-        },
-      });
-    }
-  }
-
-  // 3. Create process stages (RF-07)
+  // Create process stages (RF-07)
   const defaultStages = ['Corte', 'Roscado', 'Doblado', 'Pintura'];
   await tx.procesoEtapa.createMany({
     data: defaultStages.map((stage, idx) => ({
@@ -633,50 +585,11 @@ async function executeApprovalSideEffectsMock(ordenId: string) {
   const order = db.ordenesFabricacion.find(o => o.id === ordenId);
   if (!order) return;
 
-  const details = db.detalleOrden.filter(d => d.ordenId === ordenId);
-  const systemUser = db.users.find(u => u.role === Role.ALMACENERO) || { id: 'system' };
-
-  for (const d of details) {
-    const prod = db.productosFichaTecnica.find(p => p.id === d.productoId);
-    if (!prod) continue;
-
-    const formulaJson = JSON.parse(prod.formulaCalculo);
-    let formulaStr = formulaJson.formula.toLowerCase();
-    formulaStr = formulaStr.replace(/largo/g, d.largo.toString());
-    formulaStr = formulaStr.replace(/ancho/g, d.ancho.toString());
-    formulaStr = formulaStr.replace(/cantidad/g, d.cantidadSolicitada.toString());
-    formulaStr = formulaStr.replace(/espesor/g, d.espesor.toString());
-    
-    let calculatedQty = 0;
-    try {
-      calculatedQty = new Function(`return ${formulaStr}`)();
-    } catch (e) {
-      calculatedQty = d.largo * d.cantidadSolicitada;
-    }
-
-    const mat = db.materiaPrima.find(mp => mp.id === prod.materiaPrimaId);
-    if (mat) {
-      mat.stockActual = mat.stockActual - calculatedQty;
-      mat.actualizadoEn = new Date().toISOString();
-
-      // Add to Kardex
-      db.kardexInventario.push({
-        id: `kdx-${Date.now()}-${Math.random()}`,
-        materiaPrimaId: mat.id,
-        tipoMovimiento: TipoMovimiento.EGRESO,
-        cantidad: calculatedQty,
-        motivo: `Descuento automático: Aprobación Orden #${order.codigoCorrelativoUnico}`,
-        usuarioId: systemUser.id,
-        creadoEn: new Date().toISOString(),
-      });
-    }
-  }
-
-  // Create process stages
+  // Create process stages (RF-07)
   const defaultStages = ['Corte', 'Roscado', 'Doblado', 'Pintura'];
   defaultStages.forEach((stage, idx) => {
     db.procesoEtapa.push({
-      id: `pe-${Date.now()}-${idx}`,
+      id: `pe-${ordenId}-${idx}`,
       ordenId: ordenId,
       etapaNombre: stage,
       ordenSecuencia: idx + 1,
@@ -858,10 +771,15 @@ export async function updateProcessStage(id: string, completada: boolean, operar
 export async function registerPurchaseInput(data: {
   materiaPrimaId: string;
   cantidad: number;
-  motivo: string; // e.g. "Ingreso por compra a distribuidor Ansec"
+  motivo: string; 
   usuarioId: string;
+  tipoMovimiento?: TipoMovimiento;
 }) {
   const isPg = await checkDbMode();
+  const tipo = data.tipoMovimiento || (data.cantidad < 0 ? TipoMovimiento.EGRESO : TipoMovimiento.INGRESO);
+  const absoluteQty = Math.abs(data.cantidad);
+  const delta = tipo === TipoMovimiento.EGRESO ? -absoluteQty : absoluteQty;
+
   if (isPg) {
     return await prisma.$transaction(async (tx: any) => {
       // 1. Get raw material
@@ -869,7 +787,7 @@ export async function registerPurchaseInput(data: {
       if (!mat) throw new Error('Materia prima no encontrada');
 
       // 2. Update stock
-      const nextStock = mat.stockActual + data.cantidad;
+      const nextStock = mat.stockActual + delta;
       await tx.materiaPrima.update({
         where: { id: mat.id },
         data: { stockActual: nextStock },
@@ -879,8 +797,8 @@ export async function registerPurchaseInput(data: {
       return await tx.kardexInventario.create({
         data: {
           materiaPrimaId: mat.id,
-          tipoMovimiento: TipoMovimiento.INGRESO,
-          cantidad: data.cantidad,
+          tipoMovimiento: tipo,
+          cantidad: absoluteQty,
           motivo: data.motivo,
           usuarioId: data.usuarioId,
         },
@@ -891,14 +809,14 @@ export async function registerPurchaseInput(data: {
     const mat = db.materiaPrima.find(mp => mp.id === data.materiaPrimaId);
     if (!mat) throw new Error('Materia prima no encontrada');
 
-    mat.stockActual += data.cantidad;
+    mat.stockActual += delta;
     mat.actualizadoEn = new Date().toISOString();
 
     const newKdx = {
       id: `kdx-${Date.now()}`,
       materiaPrimaId: mat.id,
-      tipoMovimiento: TipoMovimiento.INGRESO,
-      cantidad: data.cantidad,
+      tipoMovimiento: tipo,
+      cantidad: absoluteQty,
       motivo: data.motivo,
       usuarioId: data.usuarioId,
       creadoEn: new Date().toISOString(),

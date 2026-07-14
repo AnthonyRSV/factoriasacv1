@@ -50,7 +50,7 @@ export async function POST(req: NextRequest) {
     if (!authResult.authorized) return authResult.errorResponse!;
 
     const body = await req.json();
-    const { materiaPrimaId, cantidad, motivo } = body;
+    const { materiaPrimaId, cantidad, motivo, tipoMovimiento } = body;
 
     if (!materiaPrimaId || !cantidad || !motivo) {
       return NextResponse.json({ error: 'Se requieren materiaPrimaId, cantidad y motivo.' }, { status: 400 });
@@ -61,6 +61,7 @@ export async function POST(req: NextRequest) {
       cantidad: Number(cantidad),
       motivo,
       usuarioId: authResult.user.id,
+      tipoMovimiento,
     });
 
     return NextResponse.json(newMovement, { status: 201 });
