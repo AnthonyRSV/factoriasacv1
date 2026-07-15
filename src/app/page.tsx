@@ -146,6 +146,9 @@ export default function Home() {
 
   // Modals & Detail Simulation State
   const [selectedOrder, setSelectedOrder] = useState<any>(null);
+  const [adicionalAbono, setAdicionalAbono] = useState<string>('');
+  const [confirmingPaymentOrderId, setConfirmingPaymentOrderId] = useState<string | null>(null);
+  const [ocSearchQuery, setOcSearchQuery] = useState<string>('OC-');
   const [activeExternalToken, setActiveExternalToken] = useState<string | null>(null);
   const [externalOrderData, setExternalOrderData] = useState<any>(null);
   const [stageOperario, setStageOperario] = useState<{ [key: string]: string }>({});
@@ -155,8 +158,8 @@ export default function Home() {
     clienteNombre: '',
     tipoCliente: 'TIENDA' as 'TIENDA' | 'EMPRESA',
     fechaComprometida: '',
-    montoTotal: 0,
-    montoAbonado: 0,
+    montoTotal: 0 as number | '',
+    montoAbonado: 0 as number | '',
     metodoPago: 'EFECTIVO',
     esUrgente: false,
     productoId: '',
@@ -349,26 +352,25 @@ export default function Home() {
 
   const matPreview = getCalculatedMaterial();
 
+  const filteredOrders = orders.filter(order => {
+    if (ocSearchQuery === 'OC-' || !ocSearchQuery) return true;
+    return order.numeroOrdenCompra && order.numeroOrdenCompra.toLowerCase().includes(ocSearchQuery.toLowerCase());
+  });
+
   // Watch change in form to adjust base pricing automatically
   const handleFormChange = (field: string, value: any) => {
     setOrderForm(prev => {
       const updated = { ...prev, [field]: value };
       
-      let basePrice = 20; 
-      const subtotal = basePrice * updated.cantidadSolicitada;
+      if (field !== 'montoTotal') {
+        let basePrice = 20; 
+        const subtotal = basePrice * updated.cantidadSolicitada;
 
-      let extra = 0;
-      if (updated.colorPintura && updated.colorPintura !== 'Ninguno') extra += 5 * updated.cantidadSolicitada;
-      if (updated.tuercasTipo && updated.tuercasTipo !== 'Ninguno') extra += 8 * updated.cantidadSolicitada;
+        let extra = 0;
+        if (updated.colorPintura && updated.colorPintura !== 'Ninguno') extra += 5 * updated.cantidadSolicitada;
+        if (updated.tuercasTipo && updated.tuercasTipo !== 'Ninguno') extra += 8 * updated.cantidadSolicitada;
 
-      updated.montoTotal = subtotal + extra;
-
-      if (updated.tipoCliente === 'EMPRESA') {
-        updated.montoAbonado = 0;
-      } else if (updated.clienteNombre.toLowerCase() !== 'tienda') {
-        updated.montoAbonado = parseFloat((updated.montoTotal * 0.50).toFixed(2));
-      } else {
-        updated.montoAbonado = updated.montoTotal;
+        updated.montoTotal = subtotal + extra;
       }
 
       return updated;
@@ -399,21 +401,17 @@ export default function Home() {
       return;
     }
 
-    if (orderForm.tipoCliente === 'EMPRESA' && !orderForm.numeroOrdenCompra) {
-      setFormError('Para clientes corporativos (Empresa), debe ingresar el Número de Orden de Compra (OC).');
-      return;
-    }
+
 
     try {
       const payload = {
         clienteNombre: orderForm.clienteNombre,
         tipoCliente: orderForm.tipoCliente,
         fechaComprometida: orderForm.fechaComprometida,
-        montoTotal: orderForm.montoTotal,
-        montoAbonado: orderForm.montoAbonado,
+        montoTotal: Number(orderForm.montoTotal) || 0,
+        montoAbonado: Number(orderForm.montoAbonado) || 0,
         metodoPago: orderForm.metodoPago,
         esUrgente: orderForm.esUrgente,
-        numeroOrdenCompra: orderForm.tipoCliente === 'EMPRESA' ? orderForm.numeroOrdenCompra : undefined,
         detalles: [{
           productoId: orderForm.productoId,
           descripcionProducto: orderForm.descripcionProducto,
@@ -438,8 +436,8 @@ export default function Home() {
           clienteNombre: '',
           tipoCliente: 'TIENDA',
           fechaComprometida: '',
-          montoTotal: 0,
-          montoAbonado: 0,
+          montoTotal: 0 as number | '',
+          montoAbonado: 0 as number | '',
           metodoPago: 'EFECTIVO',
           esUrgente: false,
           productoId: '',
@@ -476,6 +474,32 @@ export default function Home() {
       }
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  const handleAddAbonoSubmit = async (orderId: string) => {
+    const amt = parseFloat(adicionalAbono);
+    if (isNaN(amt) || amt <= 0) {
+      alert('Ingrese un monto de abono válido mayor a cero.');
+      return;
+    }
+    try {
+      const res = await fetch(`/api/orders/${orderId}`, {
+        method: 'PATCH',
+        headers: getHeaders(),
+        body: JSON.stringify({ abonoAdicional: amt }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setSelectedOrder(data);
+        setAdicionalAbono('');
+        loadData();
+      } else {
+        alert(`Error: ${data.error || 'El monto ingresado supera el saldo pendiente de la orden.'}`);
+      }
+    } catch (err: any) {
+      console.error(err);
+      alert('Error de conexión.');
     }
   };
 
@@ -1527,11 +1551,51 @@ export default function Home() {
                 )}
               </div>
 
+              <div style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                <label style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>Buscar por Código OC:</label>
+                <input
+                  type="text"
+                  value={ocSearchQuery}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val.startsWith('OC-')) {
+                      setOcSearchQuery(val);
+                    } else if (val.length < 3) {
+                      setOcSearchQuery('OC-');
+                    } else {
+                      const clean = val.replace('OC-', '');
+                      setOcSearchQuery('OC-' + clean);
+                    }
+                  }}
+                  placeholder="Ej. 26-00001"
+                  style={{
+                    padding: '0.5rem 0.75rem',
+                    fontSize: '0.875rem',
+                    borderRadius: 'var(--radius-sm)',
+                    border: '1px solid var(--border-color)',
+                    background: '#FFFFFF',
+                    color: '#000000',
+                    fontWeight: 'bold',
+                    width: '240px'
+                  }}
+                />
+                {ocSearchQuery !== 'OC-' && (
+                  <button
+                    className="btn btnSecondary"
+                    style={{ padding: '0.4rem 0.75rem', fontSize: '0.85rem' }}
+                    onClick={() => setOcSearchQuery('OC-')}
+                  >
+                    Limpiar
+                  </button>
+                )}
+              </div>
+
               <div className="tableContainer">
                 <table>
                   <thead>
                     <tr>
                       <th>Cód. Correlativo</th>
+                      <th>Código OC</th>
                       <th>Cliente</th>
                       <th>Cometido Entrega</th>
                       <th>Monto Total</th>
@@ -1543,14 +1607,15 @@ export default function Home() {
                     </tr>
                   </thead>
                   <tbody>
-                    {orders.length === 0 ? (
+                    {filteredOrders.length === 0 ? (
                       <tr>
-                        <td colSpan={9} style={{ textAlign: 'center', color: 'var(--color-text-muted)' }}>No hay órdenes de fabricación registradas.</td>
+                        <td colSpan={10} style={{ textAlign: 'center', color: 'var(--color-text-muted)' }}>No hay órdenes de fabricación registradas.</td>
                       </tr>
                     ) : (
-                      orders.map((order) => (
+                      filteredOrders.map((order) => (
                         <tr key={order.id}>
-                          <td><strong>Orden {order.codigoCorrelativoUnico}</strong></td>
+                          <td><strong>{order.codigoCorrelativoUnico}</strong></td>
+                          <td><code>{order.numeroOrdenCompra || '-'}</code></td>
                           <td>
                             {order.clienteNombre}
                             <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginLeft: '0.4rem' }}>
@@ -1599,7 +1664,7 @@ export default function Home() {
                                 <button
                                   className="btn btnSuccess"
                                   style={{ padding: '0.3rem 0.6rem', fontSize: '0.8rem' }}
-                                  onClick={() => handleStatusTransition(order.id, 'APROBADA')}
+                                  onClick={() => setConfirmingPaymentOrderId(order.id)}
                                 >
                                   Aprobar Pago
                                 </button>
@@ -1768,32 +1833,20 @@ export default function Home() {
                         type="number"
                         step="0.01"
                         value={orderForm.montoTotal}
-                        onChange={(e) => handleFormChange('montoTotal', parseFloat(e.target.value) || 0)}
+                        onChange={(e) => handleFormChange('montoTotal', e.target.value === '' ? '' : parseFloat(e.target.value) || 0)}
                         style={{ fontWeight: 'bold' }}
                       />
                     </div>
-                    {orderForm.tipoCliente !== 'EMPRESA' ? (
-                      <div className="formGroup">
-                        <label>Abono Inicial del Pago</label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={orderForm.montoAbonado}
-                          onChange={(e) => setOrderForm(prev => ({ ...prev, montoAbonado: Number(e.target.value) || 0 }))}
-                        />
-                      </div>
-                    ) : (
-                      <div className="formGroup">
-                        <label>Número de Orden de Compra (OC)</label>
-                        <input
-                          type="text"
-                          value={orderForm.numeroOrdenCompra || ''}
-                          placeholder="Ej. OC-2026-9842"
-                          onChange={(e) => handleFormChange('numeroOrdenCompra', e.target.value)}
-                          required
-                        />
-                      </div>
-                    )}
+                    <div className="formGroup">
+                      <label>Abono Inicial del Pago</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={orderForm.montoAbonado}
+                        onChange={(e) => setOrderForm(prev => ({ ...prev, montoAbonado: e.target.value === '' ? '' : Number(e.target.value) || 0 }))}
+                        required
+                      />
+                    </div>
                   </div>
 
                   <button className="btn btnPrimary" type="submit" style={{ width: '100%', marginTop: '0.5rem' }}>
@@ -2100,13 +2153,178 @@ export default function Home() {
                 <h4>Ficha de Producción: Orden #{selectedOrder.codigoCorrelativoUnico}</h4>
                 <button className="btn btnSecondary" style={{ padding: '0.25rem 0.5rem' }} onClick={() => setSelectedOrder(null)}>✕ Cerrar</button>
               </div>
-              <p><strong>Cliente:</strong> {selectedOrder.clienteNombre}</p>
-              {selectedOrder.detalles?.map((d: any, idx: number) => (
-                <div key={idx}>
-                  <p><strong>Producto:</strong> {d.producto?.nombre}</p>
-                  <p><strong>Descripción:</strong> {d.descripcionProducto}</p>
+
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem', fontSize: '0.9rem', marginBottom: '1.25rem' }}>
+                <div style={{ flex: '1 1 200px' }}>
+                  <p><strong>Cliente:</strong> {selectedOrder.clienteNombre} ({selectedOrder.tipoCliente}){selectedOrder.numeroOrdenCompra && ` [OC: ${selectedOrder.numeroOrdenCompra}]`}</p>
+                  <p><strong>Fecha Comprometida:</strong> {new Date(selectedOrder.fechaComprometida).toLocaleDateString('es-PE')}</p>
+                  <p><strong>Monto Facturado:</strong> S/. {selectedOrder.montoTotal} {selectedOrder.cargoUrgencia > 0 && `(Inc. recargo S/. ${selectedOrder.cargoUrgencia} por urgencia)`}</p>
+                  <p><strong>Monto Abonado:</strong> S/. {selectedOrder.montoAbonado}</p>
+                  {selectedOrder.montoTotal > 2000 && (
+                    <p style={{ margin: '0.25rem 0 0.5rem 0' }}>
+                      <strong>Clasificación:</strong>{' '}
+                      <span className="badge" style={{ background: 'rgba(59, 130, 246, 0.2)', color: '#3B82F6', border: '1px solid rgba(59, 130, 246, 0.4)', fontWeight: 'bold', fontSize: '0.75rem', padding: '0.15rem 0.4rem', borderRadius: '4px' }}>
+                        Bancario
+                      </span>
+                    </p>
+                  )}
+                  {selectedOrder.estado === 'PENDIENTE_PAGO' && (currentUser.role === 'VENDEDOR' || currentUser.role === 'ADMIN') && (
+                    <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem', alignItems: 'center' }}>
+                      <input
+                        type="number"
+                        placeholder="Agregar abono (S/.)"
+                        value={adicionalAbono}
+                        onChange={(e) => setAdicionalAbono(e.target.value)}
+                        style={{ padding: '0.2rem 0.4rem', fontSize: '0.8rem', width: '130px', background: 'white', color: 'black' }}
+                      />
+                      <button
+                        className="btn btnSuccess"
+                        style={{ padding: '0.2rem 0.5rem', fontSize: '0.8rem' }}
+                        onClick={() => handleAddAbonoSubmit(selectedOrder.id)}
+                      >
+                        Agregar Abono
+                      </button>
+                    </div>
+                  )}
                 </div>
-              ))}
+                <div style={{ flex: '1 1 200px' }}>
+                  <p><strong>Metodo Pago:</strong> {selectedOrder.metodoPago}</p>
+                  <p><strong>Estado:</strong> <span className="badge badgeAprobada" style={{ padding: '0.1rem 0.4rem' }}>{selectedOrder.estado}</span></p>
+                  <p><strong>Fecha Registro:</strong> {new Date(selectedOrder.creadoEn).toLocaleString()}</p>
+                  <p><strong>Autorización de Salida:</strong> {selectedOrder.salidaAutorizada ? `✅ Autorizado por ${selectedOrder.salidaAutorizada.jefeTaller?.name}` : '❌ Pendiente Autorizar'}</p>
+                </div>
+              </div>
+
+              {/* Physical specifications */}
+              <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '1rem', marginBottom: '1.25rem' }}>
+                <h5 style={{ marginBottom: '0.5rem' }}>Detalle de Producto</h5>
+                {selectedOrder.detalles?.map((d: any) => (
+                  <div key={d.id} style={{ fontSize: '0.85rem', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                    <p><strong>Producto:</strong> {d.producto?.nombre}</p>
+                    <p><strong>Cantidad:</strong> {d.cantidadSolicitada} unidades</p>
+                    {d.descripcionProducto ? (
+                      <p style={{ gridColumn: 'span 2' }}><strong>Descripción:</strong> {d.descripcionProducto}</p>
+                    ) : (
+                      <>
+                        <p><strong>Largo:</strong> {d.largo} m</p>
+                        <p><strong>Ancho:</strong> {d.ancho} m</p>
+                        <p><strong>Espesor:</strong> {d.espesor} pulg/mm</p>
+                      </>
+                    )}
+                    <p><strong>Calidad Acero:</strong> {d.calidadAcero}</p>
+                    {d.colorPintura && <p><strong>Pintura:</strong> {d.colorPintura}</p>}
+                    {d.tuercasTipo && <p><strong>Tuercas:</strong> {d.tuercasTipo}</p>}
+                  </div>
+                ))}
+              </div>
+
+              {/* Process line (RF-07) */}
+              {selectedOrder.estado !== 'PENDIENTE_PAGO' && selectedOrder.procesos && (
+                <div style={{ marginBottom: '1.25rem' }}>
+                  <h5 style={{ marginBottom: '0.5rem' }}>Línea de Proceso y Operarios</h5>
+                  <div className="progressList">
+                    {selectedOrder.procesos.map((stage: any) => {
+                      const isJefe = currentUser.role === 'JEFE_TALLER' || currentUser.role === 'ADMIN';
+                      return (
+                        <div key={stage.id} className={`progressItem ${stage.completada ? 'progressItemDone' : ''}`}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            <span className={getStageDotClass(stage)} />
+                            <span><strong>{stage.etapaNombre}</strong> (Paso {stage.ordenSecuencia})</span>
+                          </div>
+
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            {stage.completada ? (
+                              <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
+                                Realizado por: <strong>{stage.operarioAsignado || 'Operario'}</strong>
+                              </span>
+                            ) : isJefe ? (
+                              <div style={{ display: 'flex', gap: '0.25rem' }}>
+                                <input
+                                  type="text"
+                                  placeholder="Operario"
+                                  value={stageOperario[stage.id] || stage.operarioAsignado || ''}
+                                  onChange={(e) => setStageOperario(prev => ({ ...prev, [stage.id]: e.target.value }))}
+                                  style={{ padding: '0.2rem 0.4rem', fontSize: '0.75rem', width: '100px', background: 'white', color: 'black' }}
+                                />
+                                <button
+                                  className="btn btnSuccess"
+                                  style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }}
+                                  onClick={() => handleUpdateStage(stage.id, selectedOrder, true)}
+                                >
+                                  Listo
+                                </button>
+                              </div>
+                            ) : (
+                              <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Pendiente</span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Modify Order Form (RF-03: Vendedor or Jefe) */}
+              {(currentUser.role === 'VENDEDOR' || currentUser.role === 'JEFE_TALLER') && (
+                <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '1rem', marginTop: '1rem' }}>
+                  <h5 style={{ marginBottom: '0.5rem' }}>Modificar Parámetros de Orden</h5>
+                  <div className="formRow" style={{ gap: '0.5rem' }}>
+                    <div className="formGroup" style={{ flex: 1 }}>
+                      <label style={{ fontSize: '0.75rem' }}>Color Pintura</label>
+                      <input
+                        type="text"
+                        id="modColor"
+                        defaultValue={selectedOrder.detalles?.[0]?.colorPintura || ''}
+                        style={{ padding: '0.4rem', fontSize: '0.8rem' }}
+                      />
+                    </div>
+                    <div className="formGroup" style={{ flex: 1 }}>
+                      <label style={{ fontSize: '0.75rem' }}>Tuercas/Accesorios</label>
+                      <input
+                        type="text"
+                        id="modNuts"
+                        defaultValue={selectedOrder.detalles?.[0]?.tuercasTipo || ''}
+                        style={{ padding: '0.4rem', fontSize: '0.8rem' }}
+                      />
+                    </div>
+                    <div className="formGroup" style={{ flex: 1 }}>
+                      <label style={{ fontSize: '0.75rem' }}>Fecha Entrega</label>
+                      <input
+                        type="date"
+                        id="modDate"
+                        defaultValue={selectedOrder.fechaComprometida ? selectedOrder.fechaComprometida.substring(0, 10) : ''}
+                        style={{ padding: '0.4rem', fontSize: '0.8rem' }}
+                      />
+                    </div>
+                  </div>
+                  <button
+                    className="btn btnSecondary"
+                    style={{ width: '100%', padding: '0.5rem', fontSize: '0.85rem' }}
+                    onClick={() => {
+                      const colorEl = document.getElementById('modColor') as HTMLInputElement;
+                      const nutsEl = document.getElementById('modNuts') as HTMLInputElement;
+                      const dateEl = document.getElementById('modDate') as HTMLInputElement;
+                      handleModifyOrder(selectedOrder.id, colorEl.value, nutsEl.value, dateEl.value);
+                    }}
+                  >
+                    Guardar Cambios
+                  </button>
+                </div>
+              )}
+
+              {/* Physical release authorization triggers (RF-15) */}
+              {currentUser.role === 'JEFE_TALLER' && selectedOrder.estado === 'APROBADA' && !selectedOrder.salidaAutorizada && (
+                <div style={{ background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.2)', padding: '1rem', borderRadius: '8px', marginTop: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ fontSize: '0.8rem' }}>
+                    <strong>Autorizar Salida del Almacén</strong>
+                    <p style={{ margin: 0, color: 'var(--color-text-secondary)' }}>Firma la entrega de varillas/insumos al taller de metalúrgica.</p>
+                  </div>
+                  <button className="btn btnSuccess" onClick={() => handleAuthorizeRelease(selectedOrder.id)}>
+                    ✍️ Autorizar Salida
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -2148,6 +2366,33 @@ export default function Home() {
                 ) : (
                   <p style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>Esperando aprobación para iniciar el flujo de fabricación (Corte ➡️ Roscado ➡️ Doblado ➡️ Pintura).</p>
                 )}
+              </div>
+            </div>
+          </div>
+        )}
+        {confirmingPaymentOrderId && (
+          <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(0,0,0,0.85)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 2100, padding: '1.5rem' }}>
+            <div className="card" style={{ maxWidth: '400px', width: '100%', textAlign: 'center', padding: '2rem' }}>
+              <h4 style={{ marginBottom: '1rem', color: 'white' }}>Confirmar Pago Total</h4>
+              <p style={{ fontSize: '0.9rem', color: 'var(--color-text-secondary)', marginBottom: '1.5rem' }}>
+                ¿Está seguro de que va a pagar la totalidad de la orden?
+              </p>
+              <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center' }}>
+                <button
+                  className="btn btnSuccess"
+                  onClick={() => {
+                    handleStatusTransition(confirmingPaymentOrderId, 'APROBADA');
+                    setConfirmingPaymentOrderId(null);
+                  }}
+                >
+                  SÍ
+                </button>
+                <button
+                  className="btn btnSecondary"
+                  onClick={() => setConfirmingPaymentOrderId(null)}
+                >
+                  NO
+                </button>
               </div>
             </div>
           </div>

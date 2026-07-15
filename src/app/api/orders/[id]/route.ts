@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getOrderById, modifyOrder, updateOrderStatus, getUserByEmail } from '@/lib/data-layer';
+import { getOrderById, modifyOrder, updateOrderStatus, getUserByEmail, addOrderAbono } from '@/lib/data-layer';
 import { Role, EstadoOrden } from '@prisma/client';
 
 async function checkAuth(req: NextRequest, allowedRoles: Role[]): Promise<{ authorized: boolean; user?: any; errorResponse?: NextResponse }> {
@@ -68,7 +68,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   try {
     const { id } = await params;
     const body = await req.json();
-    const { estado } = body;
+    const { estado, abonoAdicional } = body;
+
+    if (abonoAdicional !== undefined) {
+      const authResult = await checkAuth(req, [Role.ADMIN, Role.VENDEDOR]);
+      if (!authResult.authorized) return authResult.errorResponse!;
+
+      const updated = await addOrderAbono(id, Number(abonoAdicional));
+      return NextResponse.json(updated);
+    }
 
     if (!estado) {
       return NextResponse.json({ error: 'Falta especificar el estado.' }, { status: 400 });

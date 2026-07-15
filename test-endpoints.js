@@ -118,6 +118,11 @@ async function testSuite() {
     if (order.estado !== 'APROBADA') {
       throw new Error(`Assertion failed: Order state is ${order.estado}, expected APROBADA (exemption approved)`);
     }
+
+    if (!order.numeroOrdenCompra || !/^OC-\d{2}-\d{5}$/.test(order.numeroOrdenCompra)) {
+      throw new Error(`Assertion failed: Order OC is "${order.numeroOrdenCompra}", expected strict format OC-YY-NNNNN (e.g. OC-26-00001)`);
+    }
+    console.log(`✅ Assertion passed: Strict OC format verified: ${order.numeroOrdenCompra}`);
     console.log('✅ Assertion passed: Corporate Order with Purchase Order is auto-approved with S/. 0 deposit.');
 
     // 3. Verify stock is NOT automatically deducted on order approval (Point 2: Discard rigid auto-egress)

@@ -403,20 +403,14 @@ export async function createOrder(data: {
 
   // Validate Payment rules (RF-06)
   // Exception: Damper (or other big companies) auto approves and is exempt from 50% check.
-  // Also, if they provide a Purchase Order (numeroOrdenCompra), they are exempt!
-  const hasPurchaseOrder = !!data.numeroOrdenCompra;
-  const isCorporateExempt = data.clienteNombre.toLowerCase().includes('damper') || hasPurchaseOrder;
+  // Also, if they are a Corporate/Empresa client, they are exempt!
+  const isCorporateExempt = data.clienteNombre.toLowerCase().includes('damper') || data.tipoCliente === 'EMPRESA';
 
-  if (!isCorporateExempt) {
-    const minAbonado = data.montoTotal * 0.50;
-    if (data.montoAbonado < minAbonado) {
-      throw new Error(`Se requiere un abono mínimo del 50% para clientes de tienda (Mínimo: S/. ${minAbonado.toFixed(2)} Soles).`);
-    }
-  }
+  // NOTE: Validation for minimum 50% abono has been disabled as requested.
+  // We no longer block orders with less than 50% abono or 0 Soles initial payment.
 
-  if (data.montoTotal > 2000 && data.metodoPago === 'EFECTIVO') {
-    throw new Error('Las órdenes superiores a 2000 Soles exigen que el pago sea marcado como BANCARIZADO (Transferencia/Tarjeta).');
-  }
+  // Over-2000 orders are automatically assigned the "BANCARIZADO" payment method (Requirement correction)
+  const finalMetodoPago = data.montoTotal > 2000 ? 'BANCARIZADO' : data.metodoPago;
 
   // RF-10: Work out extra cost for urgent orders if workshop is at capacity (defined as 5 or more active APROBADA orders)
   let cargoUrgencia = 0;
@@ -430,11 +424,11 @@ export async function createOrder(data: {
   // Set the initial status based on payment or client type
   let initialStatus: EstadoOrden = EstadoOrden.PENDIENTE_PAGO;
   if (isCorporateExempt) {
-    initialStatus = EstadoOrden.APROBADA; // Auto-approved due to corporate exemption or Purchase Order
+    initialStatus = EstadoOrden.APROBADA; // Auto-approved due to corporate exemption
   } else if (data.montoAbonado >= data.montoTotal) {
     initialStatus = EstadoOrden.APROBADA; // Paid in full
   } else if (data.montoAbonado >= (data.montoTotal * 0.50)) {
-    // For normal external clients, a 50% deposit lets it be approved or stay in PENDIENTE_PAGO depending on policy.
+    // For normal external clients, a 50% deposit lets it be approved
     initialStatus = EstadoOrden.APROBADA;
   }
 
@@ -442,6 +436,33 @@ export async function createOrder(data: {
 
   if (isPg) {
     return await prisma.$transaction(async (tx: any) => {
+      // Generate strict unique OC format: OC-YY-NNNNN (Requirement 1)
+      const currentYear = new Date().getFullYear();
+      const yy = currentYear.toString().slice(-2);
+      const prefix = `OC-${yy}-`;
+
+      const lastOrderWithOC = await tx.ordenesFabricacion.findFirst({
+        where: {
+          numeroOrdenCompra: {
+            startsWith: prefix,
+          },
+        },
+        orderBy: {
+          numeroOrdenCompra: 'desc',
+        },
+      });
+
+      let nextVal = 1;
+      if (lastOrderWithOC && lastOrderWithOC.numeroOrdenCompra) {
+        const lastSuffix = lastOrderWithOC.numeroOrdenCompra.slice(-5);
+        const parsed = parseInt(lastSuffix, 10);
+        if (!isNaN(parsed)) {
+          nextVal = parsed + 1;
+        }
+      }
+      const nnnnn = String(nextVal).padStart(5, '0');
+      const generatedOC = `${prefix}${nnnnn}`;
+
       // 1. Create order
       const order = await tx.ordenesFabricacion.create({
         data: {
@@ -452,11 +473,11 @@ export async function createOrder(data: {
           fechaProduccion: data.fechaProduccion ? new Date(data.fechaProduccion) : null,
           montoTotal: finalMontoTotal,
           montoAbonado: data.montoAbonado,
-          metodoPago: data.metodoPago,
+          metodoPago: finalMetodoPago,
           esUrgente: data.esUrgente,
           prioridad: data.prioridad || PrioridadOrden.NORMAL,
           cargoUrgencia: cargoUrgencia,
-          numeroOrdenCompra: data.numeroOrdenCompra,
+          numeroOrdenCompra: generatedOC,
         },
       });
 
@@ -497,6 +518,26 @@ export async function createOrder(data: {
     const nextCorrelative = db.ordenesFabricacion.reduce((max, o) => Math.max(max, o.codigoCorrelativoUnico), 0) + 1;
     const orderId = `ord-${Date.now()}`;
 
+    // Generate strict unique OC format: OC-YY-NNNNN (Requirement 1)
+    const currentYear = new Date().getFullYear();
+    const yy = currentYear.toString().slice(-2);
+    const prefix = `OC-${yy}-`;
+
+    const yearOrders = db.ordenesFabricacion.filter(o => o.numeroOrdenCompra && o.numeroOrdenCompra.startsWith(prefix));
+    yearOrders.sort((a, b) => b.numeroOrdenCompra.localeCompare(a.numeroOrdenCompra));
+    const lastOrderWithOC = yearOrders[0];
+
+    let nextVal = 1;
+    if (lastOrderWithOC && lastOrderWithOC.numeroOrdenCompra) {
+      const lastSuffix = lastOrderWithOC.numeroOrdenCompra.slice(-5);
+      const parsed = parseInt(lastSuffix, 10);
+      if (!isNaN(parsed)) {
+        nextVal = parsed + 1;
+      }
+    }
+    const nnnnn = String(nextVal).padStart(5, '0');
+    const generatedOC = `${prefix}${nnnnn}`;
+
     const newOrder = {
       id: orderId,
       codigoCorrelativoUnico: nextCorrelative,
@@ -508,11 +549,11 @@ export async function createOrder(data: {
       prioridad: data.prioridad || PrioridadOrden.NORMAL,
       montoTotal: finalMontoTotal,
       montoAbonado: data.montoAbonado,
-      metodoPago: data.metodoPago,
+      metodoPago: finalMetodoPago,
       esUrgente: data.esUrgente,
       cargoUrgencia: cargoUrgencia,
       tokenConsulta: `token-${orderId}`,
-      numeroOrdenCompra: data.numeroOrdenCompra || null,
+      numeroOrdenCompra: generatedOC,
       creadoEn: new Date().toISOString(),
       actualizadoEn: new Date().toISOString(),
     };
@@ -711,6 +752,57 @@ export async function updateOrderStatus(id: string, status: EstadoOrden) {
     writeMockDb(db);
 
     if (status === EstadoOrden.APROBADA && oldStatus === EstadoOrden.PENDIENTE_PAGO) {
+      await executeApprovalSideEffectsMock(id);
+    }
+
+    return getOrderById(id);
+  }
+}
+
+export async function addOrderAbono(id: string, abonoAdicional: number) {
+  const isPg = await checkDbMode();
+  const orderBefore = await getOrderById(id);
+  if (!orderBefore) throw new Error('Orden no encontrada');
+
+  const newMontoAbonado = orderBefore.montoAbonado + abonoAdicional;
+  
+  if (newMontoAbonado > orderBefore.montoTotal) {
+    throw new Error('El monto ingresado supera el saldo pendiente de la orden.');
+  }
+  
+  let nextStatus = orderBefore.estado;
+  if (newMontoAbonado >= orderBefore.montoTotal && orderBefore.estado === EstadoOrden.PENDIENTE_PAGO) {
+    nextStatus = EstadoOrden.APROBADA;
+  }
+
+  if (isPg) {
+    await prisma.$transaction(async (tx: any) => {
+      await tx.ordenesFabricacion.update({
+        where: { id },
+        data: {
+          montoAbonado: newMontoAbonado,
+          estado: nextStatus,
+        },
+      });
+
+      if (nextStatus === EstadoOrden.APROBADA && orderBefore.estado === EstadoOrden.PENDIENTE_PAGO) {
+        await executeApprovalSideEffects(id, tx);
+      }
+    });
+
+    return await getOrderById(id);
+  } else {
+    const db = readMockDb();
+    const o = db.ordenesFabricacion.find(ord => ord.id === id);
+    if (!o) throw new Error('Orden no encontrada');
+
+    const oldStatus = o.estado;
+    o.montoAbonado = newMontoAbonado;
+    o.estado = nextStatus;
+    o.actualizadoEn = new Date().toISOString();
+    writeMockDb(db);
+
+    if (nextStatus === EstadoOrden.APROBADA && oldStatus === EstadoOrden.PENDIENTE_PAGO) {
       await executeApprovalSideEffectsMock(id);
     }
 
