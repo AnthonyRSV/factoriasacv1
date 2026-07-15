@@ -1,0 +1,34 @@
+services:
+  - type: web
+    name: factoriasac
+    env: node
+    plan: free
+    region: oregon
+    buildCommand: npm install && npx prisma generate && npm run build
+    startCommand: npx prisma migrate deploy && npx next start -H 0.0.0.0 -p $PORT
+    healthCheckPath: /
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: factoriasac-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: NEXTAUTH_SECRET
+        generateValue: true
+      - key: NEXTAUTH_URL
+        value: https://factoriasac.onrender.com
+      - key: AUTH_TRUST_HOST
+        value: true
+      - key: GOOGLE_CLIENT_ID
+        value: ""
+      - key: GOOGLE_CLIENT_SECRET
+        value: ""
+
+databases:
+  - name: factoriasac-db
+    databaseName: factoriasac
+    user: factoriasac
+    plan: free

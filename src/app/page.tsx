@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { Suspense, useState, useEffect, useCallback } from 'react';
 import { signIn, signOut, useSession } from "next-auth/react";
 import { useSearchParams } from "next/navigation";
 import styles from './page.module.css';
@@ -81,10 +81,22 @@ const SidebarButton = ({ active, icon, label, onClick }: { active: boolean, icon
 
 
 
+function AuthErrorHandler({ onError }: { onError: (message: string) => void }) {
+  const searchParams = useSearchParams();
+
+  useEffect(() => {
+    const authError = searchParams.get('authError') ?? searchParams.get('error');
+    if (authError === 'not-registered' || authError === 'AccessDenied') {
+      onError('Este kbro no esta registrado');
+    }
+  }, [onError, searchParams]);
+
+  return null;
+}
+
 export default function Home() {
   // Authentication State with NextAuth
   const { data: session, status, update } = useSession();
-  const searchParams = useSearchParams();
   const [currentUser, setCurrentUser] = useState<any>(null);
   
   // When session changes, update currentUser!
@@ -123,13 +135,6 @@ export default function Home() {
   const [loginError, setLoginError] = useState<string | null>(null);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-
-  useEffect(() => {
-    const authError = searchParams.get('authError') ?? searchParams.get('error');
-    if (authError === 'not-registered' || authError === 'AccessDenied') {
-      setLoginError('Este kbro no esta registrado');
-    }
-  }, [searchParams]);
 
   // Unified Data State
   const [orders, setOrders] = useState<any[]>([]);
