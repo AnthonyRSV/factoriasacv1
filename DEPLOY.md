@@ -19,6 +19,14 @@ GOOGLE_CLIENT_SECRET="tu-google-client-secret"
 NODE_ENV="production"
 ```
 
+## 2.1. Deploy en Render usando Neon
+Si usas Neon como base de datos externa, no uses la base de datos gestionada por Render. Crea la DB en Neon, copia la cadena de conexión y pégala en la variable de entorno `DATABASE_URL` de tu servicio Render.
+
+El formato típico de Neon es:
+```env
+DATABASE_URL="postgresql://usuario:password@host:port/dbname?sslmode=require"
+```
+
 ## 3. Preparar la base de datos
 Ejecuta en el entorno de despliegue o en un stage previo:
 
@@ -26,6 +34,8 @@ Ejecuta en el entorno de despliegue o en un stage previo:
 npx prisma generate
 npx prisma migrate deploy
 ```
+
+Si render usa `render.yaml`, la variable `DATABASE_URL` debe estar definida en el panel de entorno o en los secretos de Render.
 
 Si tu hosting no ejecuta migraciones automáticamente, hazlo manualmente antes de iniciar la app.
 
