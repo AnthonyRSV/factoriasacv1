@@ -512,6 +512,7 @@ export default function Home() {
     try {
       let headers: string[] = [];
       let rows: any[][] = [];
+      let colStyles: any = {};
 
       if (title === 'Órdenes') {
         const res = await fetch('/api/orders', { headers: getHeaders() });
@@ -526,6 +527,10 @@ export default function Home() {
           'S/. ' + o.montoAbonado,
           o.estado
         ]);
+        colStyles = {
+          3: { halign: 'right' }, // Total
+          4: { halign: 'right' }, // Abonado
+        };
       } else if (title === 'Líneas de Fabricación') {
         const res = await fetch('/api/orders', { headers: getHeaders() });
         if (!res.ok) throw new Error('Error al obtener líneas');
@@ -546,6 +551,9 @@ export default function Home() {
           }
         });
         rows = list;
+        colStyles = {
+          2: { halign: 'right' }, // Secuencia
+        };
       } else if (title === 'Materia Prima') {
         const res = await fetch('/api/inventory', { headers: getHeaders() });
         if (!res.ok) throw new Error('Error al obtener inventario');
@@ -572,6 +580,10 @@ export default function Home() {
           m.stockMinimo,
           m.stockActual < m.stockMinimo ? 'CRITICO' : 'OK'
         ]);
+        colStyles = {
+          2: { halign: 'right' }, // Stock Actual
+          3: { halign: 'right' }, // Stock Minimo
+        };
       } else if (title === 'Kardex de Movimientos' || title === 'Kardex') {
         const res = await fetch('/api/inventory', { headers: getHeaders() });
         if (!res.ok) throw new Error('Error al obtener inventario');
@@ -585,6 +597,9 @@ export default function Home() {
           k.cantidad,
           k.motivo
         ]);
+        colStyles = {
+          3: { halign: 'right' }, // Cantidad
+        };
       }
 
       if (rows.length === 0) {
@@ -593,47 +608,40 @@ export default function Home() {
       }
 
       const { jsPDF } = await import('jspdf');
+      const { default: autoTable } = await import('jspdf-autotable');
       const doc = new jsPDF();
       
-      doc.setFont('Helvetica', 'bold');
+      doc.setFont('helvetica', 'bold');
       doc.setFontSize(18);
       doc.text(`REPORTE DE ${title.toUpperCase()}`, 14, 20);
       
-      doc.setFont('Helvetica', 'normal');
+      doc.setFont('helvetica', 'normal');
       doc.setFontSize(10);
       doc.text(`Fecha de Emisión: ${new Date().toLocaleDateString()}`, 14, 28);
       doc.text('Factoria SAC v1.0', 14, 34);
       
-      doc.setDrawColor(200, 200, 200);
-      doc.line(14, 38, 196, 38);
-      
-      doc.setFont('Courier', 'bold');
-      doc.setFontSize(9);
-      
-      let y = 48;
-      let headerStr = '';
-      headers.forEach(h => {
-        headerStr += h.padEnd(14).substring(0, 14) + ' ';
-      });
-      doc.text(headerStr, 14, y);
-      
-      y += 5;
-      doc.line(14, y, 196, y);
-      y += 8;
-      
-      doc.setFont('Courier', 'normal');
-      rows.forEach(row => {
-        let rowStr = '';
-        row.forEach(cell => {
-          rowStr += String(cell).substring(0, 13).padEnd(14) + ' ';
-        });
-        doc.text(rowStr, 14, y);
-        y += 6;
-        
-        if (y > 280) {
-          doc.addPage();
-          y = 20;
-        }
+      autoTable(doc, {
+        head: [headers],
+        body: rows,
+        theme: 'striped',
+        styles: {
+          font: 'helvetica',
+          fontSize: 9,
+          cellPadding: 8,
+          lineColor: [226, 232, 240], // #e2e8f0
+          lineWidth: 0.1,
+        },
+        headStyles: {
+          fillColor: [15, 23, 42], // #0f172a (Elegant Dark Navy)
+          textColor: [255, 255, 255],
+          fontStyle: 'bold',
+          cellPadding: 10,
+        },
+        alternateRowStyles: {
+          fillColor: [248, 250, 252], // #f8fafc (Zebra Stripe Ultra-Soft Blue/Grey)
+        },
+        columnStyles: colStyles,
+        startY: 40,
       });
       
       doc.save(`Reporte_${title.toLowerCase().replace(/ /g, '_')}.pdf`);
