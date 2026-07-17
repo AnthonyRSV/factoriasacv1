@@ -158,6 +158,14 @@ export default function Home() {
   const [externalOrderData, setExternalOrderData] = useState<any>(null);
   const [stageOperario, setStageOperario] = useState<{ [key: string]: string }>({});
 
+  // Report Export Filter States
+  const [ordersFilterType, setOrdersFilterType] = useState<string>('all');
+  const [ordersFilterDesde, setOrdersFilterDesde] = useState<string>('');
+  const [ordersFilterHasta, setOrdersFilterHasta] = useState<string>('');
+  const [inventoryFilterStock, setInventoryFilterStock] = useState<string>('');
+  const [kardexFilterDesde, setKardexFilterDesde] = useState<string>('');
+  const [fabLinesFilterProcess, setFabLinesFilterProcess] = useState<string>('Todos los procesos');
+
   // Form States
   const [orderForm, setOrderForm] = useState({
     clienteNombre: '',
@@ -517,7 +525,18 @@ export default function Home() {
       if (title === 'Órdenes') {
         const res = await fetch('/api/orders', { headers: getHeaders() });
         if (!res.ok) throw new Error('Error al obtener órdenes');
-        const data = await res.json();
+        let data = await res.json();
+        
+        // Filter by creation date range
+        if (ordersFilterType === 'range' && ordersFilterDesde && ordersFilterHasta) {
+          const start = new Date(ordersFilterDesde + 'T00:00:00');
+          const end = new Date(ordersFilterHasta + 'T23:59:59');
+          data = data.filter((o: any) => {
+            const date = new Date(o.creadoEn);
+            return date >= start && date <= end;
+          });
+        }
+
         headers = ['ID', 'OC', 'Cliente', 'Total', 'Abonado', 'Estado'];
         rows = data.map((o: any) => [
           o.codigoCorrelativoUnico,
@@ -540,13 +559,16 @@ export default function Home() {
         data.forEach((o: any) => {
           if (o.procesos && o.procesos.length > 0) {
             o.procesos.forEach((p: any) => {
-              list.push([
-                o.codigoCorrelativoUnico,
-                p.etapaNombre,
-                p.ordenSecuencia,
-                p.operarioAsignado || '-',
-                p.completada ? 'LISTO' : 'PENDIENTE'
-              ]);
+              // Filter by process name
+              if (fabLinesFilterProcess === 'Todos los procesos' || p.etapaNombre.toLowerCase() === fabLinesFilterProcess.toLowerCase()) {
+                list.push([
+                  o.codigoCorrelativoUnico,
+                  p.etapaNombre,
+                  p.ordenSecuencia,
+                  p.operarioAsignado || '-',
+                  p.completada ? 'LISTO' : 'PENDIENTE'
+                ]);
+              }
             });
           }
         });
@@ -571,7 +593,16 @@ export default function Home() {
         const res = await fetch('/api/inventory', { headers: getHeaders() });
         if (!res.ok) throw new Error('Error al obtener inventario');
         const data = await res.json();
-        const mats = data.materials || [];
+        let mats = data.materials || [];
+        
+        // Filter by minimum stock level
+        if (inventoryFilterStock !== '') {
+          const minStock = parseFloat(inventoryFilterStock);
+          if (!isNaN(minStock)) {
+            mats = mats.filter((m: any) => m.stockActual > minStock);
+          }
+        }
+
         headers = ['Codigo', 'Nombre', 'Stock Actual', 'Stock Minimo', 'Alerta'];
         rows = mats.map((m: any) => [
           m.codigo,
@@ -588,7 +619,17 @@ export default function Home() {
         const res = await fetch('/api/inventory', { headers: getHeaders() });
         if (!res.ok) throw new Error('Error al obtener inventario');
         const data = await res.json();
-        const kdx = data.kardex || [];
+        let kdx = data.kardex || [];
+        
+        // Filter by date from/onwards
+        if (kardexFilterDesde) {
+          const start = new Date(kardexFilterDesde + 'T00:00:00');
+          kdx = kdx.filter((k: any) => {
+            const date = new Date(k.creadoEn);
+            return date >= start;
+          });
+        }
+
         headers = ['Fecha', 'Material', 'Tipo', 'Cantidad', 'Motivo'];
         rows = kdx.map((k: any) => [
           new Date(k.creadoEn).toLocaleDateString(),
@@ -2328,12 +2369,55 @@ export default function Home() {
 
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1.25rem', marginBottom: '2rem' }}>
                   {/* Report 1: Órdenes */}
-                  <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '1.5rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '180px' }}>
+                  <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '1.5rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '260px' }}>
                     <div>
                       <h5 style={{ margin: '0 0 0.5rem 0', color: 'white', fontSize: '1rem' }}>📋 Reporte de Órdenes</h5>
-                      <p style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', margin: '0 0 1rem 0', lineHeight: '1.4' }}>
+                      <p style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', margin: '0 0 0.75rem 0', lineHeight: '1.4' }}>
                         Listado general de cotizaciones, precios, abonos, métodos de pago y estados.
                       </p>
+                      
+                      <div style={{ marginBottom: '1rem', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                        <div style={{ display: 'flex', gap: '1rem', fontSize: '0.8rem' }}>
+                          <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', cursor: 'pointer' }}>
+                            <input
+                              type="radio"
+                              name="ordersFilterType"
+                              checked={ordersFilterType === 'all'}
+                              onChange={() => setOrdersFilterType('all')}
+                            /> Todo
+                          </label>
+                          <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', cursor: 'pointer' }}>
+                            <input
+                              type="radio"
+                              name="ordersFilterType"
+                              checked={ordersFilterType === 'range'}
+                              onChange={() => setOrdersFilterType('range')}
+                            /> Por rango
+                          </label>
+                        </div>
+                        {ordersFilterType === 'range' && (
+                          <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.2rem' }}>
+                            <div style={{ flex: 1 }}>
+                              <label style={{ fontSize: '0.7rem', display: 'block', marginBottom: '0.15rem' }}>Desde</label>
+                              <input
+                                type="date"
+                                value={ordersFilterDesde}
+                                onChange={(e) => setOrdersFilterDesde(e.target.value)}
+                                style={{ padding: '0.25rem', fontSize: '0.75rem', width: '100%', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'rgba(0,0,0,0.2)', color: 'white' }}
+                              />
+                            </div>
+                            <div style={{ flex: 1 }}>
+                              <label style={{ fontSize: '0.7rem', display: 'block', marginBottom: '0.15rem' }}>Hasta</label>
+                              <input
+                                type="date"
+                                value={ordersFilterHasta}
+                                onChange={(e) => setOrdersFilterHasta(e.target.value)}
+                                style={{ padding: '0.25rem', fontSize: '0.75rem', width: '100%', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'rgba(0,0,0,0.2)', color: 'white' }}
+                              />
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </div>
                     <button
                       className="btn btnPrimary"
@@ -2345,12 +2429,27 @@ export default function Home() {
                   </div>
 
                   {/* Report 2: Líneas de Fabricación */}
-                  <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '1.5rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '180px' }}>
+                  <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '1.5rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '260px' }}>
                     <div>
                       <h5 style={{ margin: '0 0 0.5rem 0', color: 'white', fontSize: '1rem' }}>⚙️ Líneas de Fabricación</h5>
-                      <p style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', margin: '0 0 1rem 0', lineHeight: '1.4' }}>
+                      <p style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', margin: '0 0 0.75rem 0', lineHeight: '1.4' }}>
                         Progreso de etapas en taller (Corte, Roscado, Doblado, Pintura) y asignación de operarios.
                       </p>
+                      
+                      <div style={{ marginBottom: '1rem' }}>
+                        <label style={{ fontSize: '0.75rem', display: 'block', marginBottom: '0.25rem' }}>Proceso:</label>
+                        <select
+                          value={fabLinesFilterProcess}
+                          onChange={(e) => setFabLinesFilterProcess(e.target.value)}
+                          style={{ padding: '0.35rem', fontSize: '0.8rem', width: '100%', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'rgba(0,0,0,0.2)', color: 'white' }}
+                        >
+                          <option value="Todos los procesos" style={{ background: '#1e293b' }}>Todos los procesos</option>
+                          <option value="Corte" style={{ background: '#1e293b' }}>Corte</option>
+                          <option value="Roscado" style={{ background: '#1e293b' }}>Roscado</option>
+                          <option value="Doblado" style={{ background: '#1e293b' }}>Doblado</option>
+                          <option value="Pintura" style={{ background: '#1e293b' }}>Pintura</option>
+                        </select>
+                      </div>
                     </div>
                     <button
                       className="btn btnPrimary"
@@ -2362,7 +2461,7 @@ export default function Home() {
                   </div>
 
                   {/* Report 3: Materia Prima */}
-                  <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '1.5rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '180px' }}>
+                  <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '1.5rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '260px' }}>
                     <div>
                       <h5 style={{ margin: '0 0 0.5rem 0', color: 'white', fontSize: '1rem' }}>📐 Catálogo de Materia Prima</h5>
                       <p style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', margin: '0 0 1rem 0', lineHeight: '1.4' }}>
@@ -2379,12 +2478,23 @@ export default function Home() {
                   </div>
 
                   {/* Report 4: Inventario Dual */}
-                  <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '1.5rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '180px' }}>
+                  <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '1.5rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '260px' }}>
                     <div>
                       <h5 style={{ margin: '0 0 0.5rem 0', color: 'white', fontSize: '1rem' }}>📦 Inventario Dual</h5>
-                      <p style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', margin: '0 0 1rem 0', lineHeight: '1.4' }}>
+                      <p style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', margin: '0 0 0.75rem 0', lineHeight: '1.4' }}>
                         Niveles de stock físico de materiales y alertas de reposición crítica de seguridad.
                       </p>
+                      
+                      <div style={{ marginBottom: '1rem' }}>
+                        <label style={{ fontSize: '0.75rem', display: 'block', marginBottom: '0.25rem' }}>Stock mayor a (vacío = todo):</label>
+                        <input
+                          type="number"
+                          placeholder="Ej: 50"
+                          value={inventoryFilterStock}
+                          onChange={(e) => setInventoryFilterStock(e.target.value)}
+                          style={{ padding: '0.35rem', fontSize: '0.8rem', width: '100%', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'rgba(0,0,0,0.2)', color: 'white' }}
+                        />
+                      </div>
                     </div>
                     <button
                       className="btn btnPrimary"
@@ -2396,12 +2506,22 @@ export default function Home() {
                   </div>
 
                   {/* Report 5: Kardex de Movimientos */}
-                  <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '1.5rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '180px' }}>
+                  <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '1.5rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '260px' }}>
                     <div>
                       <h5 style={{ margin: '0 0 0.5rem 0', color: 'white', fontSize: '1rem' }}>📜 Kardex de Movimientos</h5>
-                      <p style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', margin: '0 0 1rem 0', lineHeight: '1.4' }}>
+                      <p style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', margin: '0 0 0.75rem 0', lineHeight: '1.4' }}>
                         Historial detallado de entradas (compras) y salidas (consumos) en el almacén físico.
                       </p>
+                      
+                      <div style={{ marginBottom: '1rem' }}>
+                        <label style={{ fontSize: '0.75rem', display: 'block', marginBottom: '0.25rem' }}>Fecha de inicio en adelante:</label>
+                        <input
+                          type="date"
+                          value={kardexFilterDesde}
+                          onChange={(e) => setKardexFilterDesde(e.target.value)}
+                          style={{ padding: '0.35rem', fontSize: '0.8rem', width: '100%', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'rgba(0,0,0,0.2)', color: 'white' }}
+                        />
+                      </div>
                     </div>
                     <button
                       className="btn btnPrimary"
