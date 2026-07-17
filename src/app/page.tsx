@@ -508,6 +508,141 @@ export default function Home() {
     }
   };
 
+  const handleExportPDF = async (title: string) => {
+    try {
+      let headers: string[] = [];
+      let rows: any[][] = [];
+
+      if (title === 'Órdenes') {
+        const res = await fetch('/api/orders', { headers: getHeaders() });
+        if (!res.ok) throw new Error('Error al obtener órdenes');
+        const data = await res.json();
+        headers = ['ID', 'OC', 'Cliente', 'Total', 'Abonado', 'Estado'];
+        rows = data.map((o: any) => [
+          o.codigoCorrelativoUnico,
+          o.numeroOrdenCompra || '-',
+          o.clienteNombre,
+          'S/. ' + o.montoTotal,
+          'S/. ' + o.montoAbonado,
+          o.estado
+        ]);
+      } else if (title === 'Líneas de Fabricación') {
+        const res = await fetch('/api/orders', { headers: getHeaders() });
+        if (!res.ok) throw new Error('Error al obtener líneas');
+        const data = await res.json();
+        headers = ['Orden', 'Etapa', 'Secuencia', 'Operario', 'Estado'];
+        const list: any[] = [];
+        data.forEach((o: any) => {
+          if (o.procesos && o.procesos.length > 0) {
+            o.procesos.forEach((p: any) => {
+              list.push([
+                o.codigoCorrelativoUnico,
+                p.etapaNombre,
+                p.ordenSecuencia,
+                p.operarioAsignado || '-',
+                p.completada ? 'LISTO' : 'PENDIENTE'
+              ]);
+            });
+          }
+        });
+        rows = list;
+      } else if (title === 'Materia Prima') {
+        const res = await fetch('/api/inventory', { headers: getHeaders() });
+        if (!res.ok) throw new Error('Error al obtener inventario');
+        const data = await res.json();
+        const mats = data.materials || [];
+        headers = ['Codigo', 'Nombre', 'Tipo', 'Diametro', 'Espesor'];
+        rows = mats.map((m: any) => [
+          m.codigo,
+          m.nombre,
+          m.tipo,
+          m.diametro || '-',
+          m.espesor || '-'
+        ]);
+      } else if (title === 'Inventario Dual') {
+        const res = await fetch('/api/inventory', { headers: getHeaders() });
+        if (!res.ok) throw new Error('Error al obtener inventario');
+        const data = await res.json();
+        const mats = data.materials || [];
+        headers = ['Codigo', 'Nombre', 'Stock Actual', 'Stock Minimo', 'Alerta'];
+        rows = mats.map((m: any) => [
+          m.codigo,
+          m.nombre,
+          m.stockActual,
+          m.stockMinimo,
+          m.stockActual < m.stockMinimo ? 'CRITICO' : 'OK'
+        ]);
+      } else if (title === 'Kardex de Movimientos' || title === 'Kardex') {
+        const res = await fetch('/api/inventory', { headers: getHeaders() });
+        if (!res.ok) throw new Error('Error al obtener inventario');
+        const data = await res.json();
+        const kdx = data.kardex || [];
+        headers = ['Fecha', 'Material', 'Tipo', 'Cantidad', 'Motivo'];
+        rows = kdx.map((k: any) => [
+          new Date(k.creadoEn).toLocaleDateString(),
+          k.materiaPrima?.nombre || '-',
+          k.tipoMovimiento,
+          k.cantidad,
+          k.motivo
+        ]);
+      }
+
+      if (rows.length === 0) {
+        alert('El reporte no tiene datos registrados actualmente.');
+        return;
+      }
+
+      const { jsPDF } = await import('jspdf');
+      const doc = new jsPDF();
+      
+      doc.setFont('Helvetica', 'bold');
+      doc.setFontSize(18);
+      doc.text(`REPORTE DE ${title.toUpperCase()}`, 14, 20);
+      
+      doc.setFont('Helvetica', 'normal');
+      doc.setFontSize(10);
+      doc.text(`Fecha de Emisión: ${new Date().toLocaleDateString()}`, 14, 28);
+      doc.text('Factoria SAC v1.0', 14, 34);
+      
+      doc.setDrawColor(200, 200, 200);
+      doc.line(14, 38, 196, 38);
+      
+      doc.setFont('Courier', 'bold');
+      doc.setFontSize(9);
+      
+      let y = 48;
+      let headerStr = '';
+      headers.forEach(h => {
+        headerStr += h.padEnd(14).substring(0, 14) + ' ';
+      });
+      doc.text(headerStr, 14, y);
+      
+      y += 5;
+      doc.line(14, y, 196, y);
+      y += 8;
+      
+      doc.setFont('Courier', 'normal');
+      rows.forEach(row => {
+        let rowStr = '';
+        row.forEach(cell => {
+          rowStr += String(cell).substring(0, 13).padEnd(14) + ' ';
+        });
+        doc.text(rowStr, 14, y);
+        y += 6;
+        
+        if (y > 280) {
+          doc.addPage();
+          y = 20;
+        }
+      });
+      
+      doc.save(`Reporte_${title.toLowerCase().replace(/ /g, '_')}.pdf`);
+    } catch (err: any) {
+      console.error(err);
+      alert('Error al descargar el PDF.');
+    }
+  };
+
   const handleModifyOrder = async (orderId: string, color: string, nuts: string, date: string) => {
     try {
       const res = await fetch(`/api/orders/${orderId}`, {
@@ -961,10 +1096,40 @@ export default function Home() {
                 onClick={() => setActiveTab('orders')}
               />
               <SidebarButton
+                active={activeTab === 'new_order'}
+                icon={<Plus size={18} strokeWidth={2} />}
+                label="Nueva Cotización"
+                onClick={() => { setActiveTab('new_order'); setFormError(null); setFormSuccess(null); }}
+              />
+              <SidebarButton
+                active={activeTab === 'production'}
+                icon={<Factory size={18} strokeWidth={2} />}
+                label="Líneas de Fabricación"
+                onClick={() => setActiveTab('production')}
+              />
+              <SidebarButton
+                active={activeTab === 'restock'}
+                icon={<ShoppingCart size={18} strokeWidth={2} />}
+                label="Ingresar Compra"
+                onClick={() => { setActiveTab('restock'); setFormError(null); setFormSuccess(null); }}
+              />
+              <SidebarButton
+                active={activeTab === 'materia_prima'}
+                icon={<PackageOpen size={18} strokeWidth={2} />}
+                label="Materia Prima (CRUD)"
+                onClick={() => setActiveTab('materia_prima')}
+              />
+              <SidebarButton
                 active={activeTab === 'inventory'}
                 icon={<PackageOpen size={18} strokeWidth={2} />}
                 label="Inventario Dual"
                 onClick={() => setActiveTab('inventory')}
+              />
+              <SidebarButton
+                active={activeTab === 'kardex'}
+                icon={<ListOrdered size={18} strokeWidth={2} />}
+                label="Kardex de Movimientos"
+                onClick={() => setActiveTab('kardex')}
               />
               <SidebarButton
                 active={activeTab === 'reports'}
@@ -1656,7 +1821,7 @@ export default function Home() {
                             </button>
                           </td>
                           <td>
-                            <div style={{ display: 'flex', gap: '0.4rem' }}>
+                <div style={{ display: 'flex', gap: '0.4rem' }}>
                               <button
                                 className="btn btnSecondary"
                                 style={{ padding: '0.3rem 0.6rem', fontSize: '0.8rem' }}
@@ -1665,7 +1830,7 @@ export default function Home() {
                                 Ver Ficha
                               </button>
 
-                              {currentUser.role === 'VENDEDOR' && order.estado === 'PENDIENTE_PAGO' && (
+                              {(currentUser.role === 'VENDEDOR' || currentUser.role === 'ADMIN') && order.estado === 'PENDIENTE_PAGO' && (
                                 <button
                                   className="btn btnSuccess"
                                   style={{ padding: '0.3rem 0.6rem', fontSize: '0.8rem' }}
@@ -1675,7 +1840,7 @@ export default function Home() {
                                 </button>
                               )}
 
-                              {currentUser.role === 'VENDEDOR' && order.estado === 'TERMINADA' && (
+                              {(currentUser.role === 'VENDEDOR' || currentUser.role === 'ADMIN') && order.estado === 'TERMINADA' && (
                                 <button
                                   className="btn btnPrimary"
                                   style={{ padding: '0.3rem 0.6rem', fontSize: '0.8rem' }}
@@ -2116,16 +2281,133 @@ export default function Home() {
           </div>
         )}
 
-        {activeTab === 'reports' && reports && (
-          <div className="tabContent">
-            <div className="grid3" style={{ marginBottom: '1.5rem' }}>
-              <div className="card">
-                <h3>Pendientes</h3>
-                <p>{reports.pendingOrdersCount}</p>
+        {activeTab === 'reports' && reports && (() => {
+          const getFabricationLinesRows = () => {
+            const list: any[] = [];
+            orders.forEach(o => {
+              if (o.procesos && o.procesos.length > 0) {
+                o.procesos.forEach((p: any) => {
+                  list.push({
+                    orderId: o.codigoCorrelativoUnico,
+                    etapa: p.etapaNombre,
+                    secuencia: p.ordenSecuencia,
+                    operario: p.operarioAsignado || '-',
+                    completada: p.completada ? 'LISTO' : 'PENDIENTE'
+                  });
+                });
+              }
+            });
+            return list;
+          };
+          const fabLines = getFabricationLinesRows();
+
+          return (
+            <div className="tabContent">
+              <div className="grid3" style={{ marginBottom: '1.5rem' }}>
+                <div className="card">
+                  <h3>Pendientes</h3>
+                  <p>{reports.pendingOrdersCount}</p>
+                </div>
+              </div>
+
+              <div className="card" style={{ marginTop: '2rem' }}>
+                <h3 style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem', marginBottom: '1.25rem' }}>
+                  📂 Panel de Exportación de Reportes Técnicos
+                </h3>
+                <p style={{ fontSize: '0.9rem', color: 'var(--color-text-secondary)', marginBottom: '1.5rem' }}>
+                  Selecciona el reporte técnico correspondiente para descargar la información completa y actualizada directamente desde la base de datos en formato PDF.
+                </p>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1.25rem', marginBottom: '2rem' }}>
+                  {/* Report 1: Órdenes */}
+                  <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '1.5rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '180px' }}>
+                    <div>
+                      <h5 style={{ margin: '0 0 0.5rem 0', color: 'white', fontSize: '1rem' }}>📋 Reporte de Órdenes</h5>
+                      <p style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', margin: '0 0 1rem 0', lineHeight: '1.4' }}>
+                        Listado general de cotizaciones, precios, abonos, métodos de pago y estados.
+                      </p>
+                    </div>
+                    <button
+                      className="btn btnPrimary"
+                      style={{ width: '100%', fontSize: '0.85rem', padding: '0.6rem' }}
+                      onClick={() => handleExportPDF('Órdenes')}
+                    >
+                      📥 Descargar PDF
+                    </button>
+                  </div>
+
+                  {/* Report 2: Líneas de Fabricación */}
+                  <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '1.5rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '180px' }}>
+                    <div>
+                      <h5 style={{ margin: '0 0 0.5rem 0', color: 'white', fontSize: '1rem' }}>⚙️ Líneas de Fabricación</h5>
+                      <p style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', margin: '0 0 1rem 0', lineHeight: '1.4' }}>
+                        Progreso de etapas en taller (Corte, Roscado, Doblado, Pintura) y asignación de operarios.
+                      </p>
+                    </div>
+                    <button
+                      className="btn btnPrimary"
+                      style={{ width: '100%', fontSize: '0.85rem', padding: '0.6rem' }}
+                      onClick={() => handleExportPDF('Líneas de Fabricación')}
+                    >
+                      📥 Descargar PDF
+                    </button>
+                  </div>
+
+                  {/* Report 3: Materia Prima */}
+                  <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '1.5rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '180px' }}>
+                    <div>
+                      <h5 style={{ margin: '0 0 0.5rem 0', color: 'white', fontSize: '1rem' }}>📐 Catálogo de Materia Prima</h5>
+                      <p style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', margin: '0 0 1rem 0', lineHeight: '1.4' }}>
+                        Catálogo y parámetros de dimensiones (diámetro, espesor) de tubos, varillas y platinas.
+                      </p>
+                    </div>
+                    <button
+                      className="btn btnPrimary"
+                      style={{ width: '100%', fontSize: '0.85rem', padding: '0.6rem' }}
+                      onClick={() => handleExportPDF('Materia Prima')}
+                    >
+                      📥 Descargar PDF
+                    </button>
+                  </div>
+
+                  {/* Report 4: Inventario Dual */}
+                  <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '1.5rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '180px' }}>
+                    <div>
+                      <h5 style={{ margin: '0 0 0.5rem 0', color: 'white', fontSize: '1rem' }}>📦 Inventario Dual</h5>
+                      <p style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', margin: '0 0 1rem 0', lineHeight: '1.4' }}>
+                        Niveles de stock físico de materiales y alertas de reposición crítica de seguridad.
+                      </p>
+                    </div>
+                    <button
+                      className="btn btnPrimary"
+                      style={{ width: '100%', fontSize: '0.85rem', padding: '0.6rem' }}
+                      onClick={() => handleExportPDF('Inventario Dual')}
+                    >
+                      📥 Descargar PDF
+                    </button>
+                  </div>
+
+                  {/* Report 5: Kardex de Movimientos */}
+                  <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '1.5rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '180px' }}>
+                    <div>
+                      <h5 style={{ margin: '0 0 0.5rem 0', color: 'white', fontSize: '1rem' }}>📜 Kardex de Movimientos</h5>
+                      <p style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', margin: '0 0 1rem 0', lineHeight: '1.4' }}>
+                        Historial detallado de entradas (compras) y salidas (consumos) en el almacén físico.
+                      </p>
+                    </div>
+                    <button
+                      className="btn btnPrimary"
+                      style={{ width: '100%', fontSize: '0.85rem', padding: '0.6rem' }}
+                      onClick={() => handleExportPDF('Kardex de Movimientos')}
+                    >
+                      📥 Descargar PDF
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {activeTab === 'produccion' && (
           <div className="tabContent">
@@ -2271,7 +2553,7 @@ export default function Home() {
               )}
 
               {/* Modify Order Form (RF-03: Vendedor or Jefe) */}
-              {(currentUser.role === 'VENDEDOR' || currentUser.role === 'JEFE_TALLER') && (
+              {(currentUser.role === 'VENDEDOR' || currentUser.role === 'JEFE_TALLER' || currentUser.role === 'ADMIN') && (
                 <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '1rem', marginTop: '1rem' }}>
                   <h5 style={{ marginBottom: '0.5rem' }}>Modificar Parámetros de Orden</h5>
                   <div className="formRow" style={{ gap: '0.5rem' }}>
@@ -2319,7 +2601,7 @@ export default function Home() {
               )}
 
               {/* Physical release authorization triggers (RF-15) */}
-              {currentUser.role === 'JEFE_TALLER' && selectedOrder.estado === 'APROBADA' && !selectedOrder.salidaAutorizada && (
+              {(currentUser.role === 'JEFE_TALLER' || currentUser.role === 'ADMIN') && selectedOrder.estado === 'APROBADA' && !selectedOrder.salidaAutorizada && (
                 <div style={{ background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.2)', padding: '1rem', borderRadius: '8px', marginTop: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div style={{ fontSize: '0.8rem' }}>
                     <strong>Autorizar Salida del Almacén</strong>

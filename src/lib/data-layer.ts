@@ -729,9 +729,14 @@ export async function updateOrderStatus(id: string, status: EstadoOrden) {
 
   if (isPg) {
     await prisma.$transaction(async (tx: any) => {
+      const updateData: any = { estado: status };
+      if (status === EstadoOrden.APROBADA && orderBefore.estado === EstadoOrden.PENDIENTE_PAGO) {
+        updateData.montoAbonado = orderBefore.montoTotal;
+      }
+
       await tx.ordenesFabricacion.update({
         where: { id },
-        data: { estado: status },
+        data: updateData,
       });
 
       // If approved from pending_pago now, execute side effects
@@ -748,6 +753,9 @@ export async function updateOrderStatus(id: string, status: EstadoOrden) {
 
     const oldStatus = o.estado;
     o.estado = status;
+    if (status === EstadoOrden.APROBADA && oldStatus === EstadoOrden.PENDIENTE_PAGO) {
+      o.montoAbonado = o.montoTotal;
+    }
     o.actualizadoEn = new Date().toISOString();
     writeMockDb(db);
 
