@@ -158,6 +158,14 @@ export default function Home() {
   const [externalOrderData, setExternalOrderData] = useState<any>(null);
   const [stageOperario, setStageOperario] = useState<{ [key: string]: string }>({});
 
+  // Report Export Filter States
+  const [ordersFilterType, setOrdersFilterType] = useState<string>('all');
+  const [ordersFilterDesde, setOrdersFilterDesde] = useState<string>('');
+  const [ordersFilterHasta, setOrdersFilterHasta] = useState<string>('');
+  const [inventoryFilterStock, setInventoryFilterStock] = useState<string>('');
+  const [kardexFilterDesde, setKardexFilterDesde] = useState<string>('');
+  const [fabLinesFilterProcess, setFabLinesFilterProcess] = useState<string>('Todos los procesos');
+
   // Form States
   const [orderForm, setOrderForm] = useState({
     clienteNombre: '',
@@ -505,6 +513,182 @@ export default function Home() {
     } catch (err: any) {
       console.error(err);
       alert('Error de conexión.');
+    }
+  };
+
+  const handleExportPDF = async (title: string) => {
+    try {
+      let headers: string[] = [];
+      let rows: any[][] = [];
+      let colStyles: any = {};
+
+      if (title === 'Órdenes') {
+        const res = await fetch('/api/orders', { headers: getHeaders() });
+        if (!res.ok) throw new Error('Error al obtener órdenes');
+        let data = await res.json();
+        
+        // Filter by creation date range
+        if (ordersFilterType === 'range' && ordersFilterDesde && ordersFilterHasta) {
+          const start = new Date(ordersFilterDesde + 'T00:00:00');
+          const end = new Date(ordersFilterHasta + 'T23:59:59');
+          data = data.filter((o: any) => {
+            const date = new Date(o.creadoEn);
+            return date >= start && date <= end;
+          });
+        }
+
+        headers = ['ID', 'OC', 'Cliente', 'Total', 'Abonado', 'Estado'];
+        rows = data.map((o: any) => [
+          o.codigoCorrelativoUnico,
+          o.numeroOrdenCompra || '-',
+          o.clienteNombre,
+          'S/. ' + o.montoTotal,
+          'S/. ' + o.montoAbonado,
+          o.estado
+        ]);
+        colStyles = {
+          3: { halign: 'right' }, // Total
+          4: { halign: 'right' }, // Abonado
+        };
+      } else if (title === 'Líneas de Fabricación') {
+        const res = await fetch('/api/orders', { headers: getHeaders() });
+        if (!res.ok) throw new Error('Error al obtener líneas');
+        const data = await res.json();
+        headers = ['Orden', 'Etapa', 'Secuencia', 'Operario', 'Estado'];
+        const list: any[] = [];
+        data.forEach((o: any) => {
+          if (o.procesos && o.procesos.length > 0) {
+            o.procesos.forEach((p: any) => {
+              // Filter by process name
+              if (fabLinesFilterProcess === 'Todos los procesos' || p.etapaNombre.toLowerCase() === fabLinesFilterProcess.toLowerCase()) {
+                list.push([
+                  o.codigoCorrelativoUnico,
+                  p.etapaNombre,
+                  p.ordenSecuencia,
+                  p.operarioAsignado || '-',
+                  p.completada ? 'LISTO' : 'PENDIENTE'
+                ]);
+              }
+            });
+          }
+        });
+        rows = list;
+        colStyles = {
+          2: { halign: 'right' }, // Secuencia
+        };
+      } else if (title === 'Materia Prima') {
+        const res = await fetch('/api/inventory', { headers: getHeaders() });
+        if (!res.ok) throw new Error('Error al obtener inventario');
+        const data = await res.json();
+        const mats = data.materials || [];
+        headers = ['Codigo', 'Nombre', 'Tipo', 'Diametro', 'Espesor'];
+        rows = mats.map((m: any) => [
+          m.codigo,
+          m.nombre,
+          m.tipo,
+          m.diametro || '-',
+          m.espesor || '-'
+        ]);
+      } else if (title === 'Inventario Dual') {
+        const res = await fetch('/api/inventory', { headers: getHeaders() });
+        if (!res.ok) throw new Error('Error al obtener inventario');
+        const data = await res.json();
+        let mats = data.materials || [];
+        
+        // Filter by minimum stock level
+        if (inventoryFilterStock !== '') {
+          const minStock = parseFloat(inventoryFilterStock);
+          if (!isNaN(minStock)) {
+            mats = mats.filter((m: any) => m.stockActual > minStock);
+          }
+        }
+
+        headers = ['Codigo', 'Nombre', 'Stock Actual', 'Stock Minimo', 'Alerta'];
+        rows = mats.map((m: any) => [
+          m.codigo,
+          m.nombre,
+          m.stockActual,
+          m.stockMinimo,
+          m.stockActual < m.stockMinimo ? 'CRITICO' : 'OK'
+        ]);
+        colStyles = {
+          2: { halign: 'right' }, // Stock Actual
+          3: { halign: 'right' }, // Stock Minimo
+        };
+      } else if (title === 'Kardex de Movimientos' || title === 'Kardex') {
+        const res = await fetch('/api/inventory', { headers: getHeaders() });
+        if (!res.ok) throw new Error('Error al obtener inventario');
+        const data = await res.json();
+        let kdx = data.kardex || [];
+        
+        // Filter by date from/onwards
+        if (kardexFilterDesde) {
+          const start = new Date(kardexFilterDesde + 'T00:00:00');
+          kdx = kdx.filter((k: any) => {
+            const date = new Date(k.creadoEn);
+            return date >= start;
+          });
+        }
+
+        headers = ['Fecha', 'Material', 'Tipo', 'Cantidad', 'Motivo'];
+        rows = kdx.map((k: any) => [
+          new Date(k.creadoEn).toLocaleDateString(),
+          k.materiaPrima?.nombre || '-',
+          k.tipoMovimiento,
+          k.cantidad,
+          k.motivo
+        ]);
+        colStyles = {
+          3: { halign: 'right' }, // Cantidad
+        };
+      }
+
+      if (rows.length === 0) {
+        alert('El reporte no tiene datos registrados actualmente.');
+        return;
+      }
+
+      const { jsPDF } = await import('jspdf');
+      const { default: autoTable } = await import('jspdf-autotable');
+      const doc = new jsPDF();
+      
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(18);
+      doc.text(`REPORTE DE ${title.toUpperCase()}`, 14, 20);
+      
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(10);
+      doc.text(`Fecha de Emisión: ${new Date().toLocaleDateString()}`, 14, 28);
+      doc.text('Factoria SAC v1.0', 14, 34);
+      
+      autoTable(doc, {
+        head: [headers],
+        body: rows,
+        theme: 'striped',
+        styles: {
+          font: 'helvetica',
+          fontSize: 9,
+          cellPadding: 8,
+          lineColor: [226, 232, 240], // #e2e8f0
+          lineWidth: 0.1,
+        },
+        headStyles: {
+          fillColor: [15, 23, 42], // #0f172a (Elegant Dark Navy)
+          textColor: [255, 255, 255],
+          fontStyle: 'bold',
+          cellPadding: 10,
+        },
+        alternateRowStyles: {
+          fillColor: [248, 250, 252], // #f8fafc (Zebra Stripe Ultra-Soft Blue/Grey)
+        },
+        columnStyles: colStyles,
+        startY: 40,
+      });
+      
+      doc.save(`Reporte_${title.toLowerCase().replace(/ /g, '_')}.pdf`);
+    } catch (err: any) {
+      console.error(err);
+      alert('Error al descargar el PDF.');
     }
   };
 
@@ -961,10 +1145,40 @@ export default function Home() {
                 onClick={() => setActiveTab('orders')}
               />
               <SidebarButton
+                active={activeTab === 'new_order'}
+                icon={<Plus size={18} strokeWidth={2} />}
+                label="Nueva Cotización"
+                onClick={() => { setActiveTab('new_order'); setFormError(null); setFormSuccess(null); }}
+              />
+              <SidebarButton
+                active={activeTab === 'production'}
+                icon={<Factory size={18} strokeWidth={2} />}
+                label="Líneas de Fabricación"
+                onClick={() => setActiveTab('production')}
+              />
+              <SidebarButton
+                active={activeTab === 'restock'}
+                icon={<ShoppingCart size={18} strokeWidth={2} />}
+                label="Ingresar Compra"
+                onClick={() => { setActiveTab('restock'); setFormError(null); setFormSuccess(null); }}
+              />
+              <SidebarButton
+                active={activeTab === 'materia_prima'}
+                icon={<PackageOpen size={18} strokeWidth={2} />}
+                label="Materia Prima (CRUD)"
+                onClick={() => setActiveTab('materia_prima')}
+              />
+              <SidebarButton
                 active={activeTab === 'inventory'}
                 icon={<PackageOpen size={18} strokeWidth={2} />}
                 label="Inventario Dual"
                 onClick={() => setActiveTab('inventory')}
+              />
+              <SidebarButton
+                active={activeTab === 'kardex'}
+                icon={<ListOrdered size={18} strokeWidth={2} />}
+                label="Kardex de Movimientos"
+                onClick={() => setActiveTab('kardex')}
               />
               <SidebarButton
                 active={activeTab === 'reports'}
@@ -1656,7 +1870,7 @@ export default function Home() {
                             </button>
                           </td>
                           <td>
-                            <div style={{ display: 'flex', gap: '0.4rem' }}>
+                <div style={{ display: 'flex', gap: '0.4rem' }}>
                               <button
                                 className="btn btnSecondary"
                                 style={{ padding: '0.3rem 0.6rem', fontSize: '0.8rem' }}
@@ -1665,7 +1879,7 @@ export default function Home() {
                                 Ver Ficha
                               </button>
 
-                              {currentUser.role === 'VENDEDOR' && order.estado === 'PENDIENTE_PAGO' && (
+                              {(currentUser.role === 'VENDEDOR' || currentUser.role === 'ADMIN') && order.estado === 'PENDIENTE_PAGO' && (
                                 <button
                                   className="btn btnSuccess"
                                   style={{ padding: '0.3rem 0.6rem', fontSize: '0.8rem' }}
@@ -1675,7 +1889,7 @@ export default function Home() {
                                 </button>
                               )}
 
-                              {currentUser.role === 'VENDEDOR' && order.estado === 'TERMINADA' && (
+                              {(currentUser.role === 'VENDEDOR' || currentUser.role === 'ADMIN') && order.estado === 'TERMINADA' && (
                                 <button
                                   className="btn btnPrimary"
                                   style={{ padding: '0.3rem 0.6rem', fontSize: '0.8rem' }}
@@ -2116,16 +2330,212 @@ export default function Home() {
           </div>
         )}
 
-        {activeTab === 'reports' && reports && (
-          <div className="tabContent">
-            <div className="grid3" style={{ marginBottom: '1.5rem' }}>
-              <div className="card">
-                <h3>Pendientes</h3>
-                <p>{reports.pendingOrdersCount}</p>
+        {activeTab === 'reports' && reports && (() => {
+          const getFabricationLinesRows = () => {
+            const list: any[] = [];
+            orders.forEach(o => {
+              if (o.procesos && o.procesos.length > 0) {
+                o.procesos.forEach((p: any) => {
+                  list.push({
+                    orderId: o.codigoCorrelativoUnico,
+                    etapa: p.etapaNombre,
+                    secuencia: p.ordenSecuencia,
+                    operario: p.operarioAsignado || '-',
+                    completada: p.completada ? 'LISTO' : 'PENDIENTE'
+                  });
+                });
+              }
+            });
+            return list;
+          };
+          const fabLines = getFabricationLinesRows();
+
+          return (
+            <div className="tabContent">
+              <div className="grid3" style={{ marginBottom: '1.5rem' }}>
+                <div className="card">
+                  <h3>Pendientes</h3>
+                  <p>{reports.pendingOrdersCount}</p>
+                </div>
+              </div>
+
+              <div className="card" style={{ marginTop: '2rem' }}>
+                <h3 style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem', marginBottom: '1.25rem' }}>
+                  📂 Panel de Exportación de Reportes Técnicos
+                </h3>
+                <p style={{ fontSize: '0.9rem', color: 'var(--color-text-secondary)', marginBottom: '1.5rem' }}>
+                  Selecciona el reporte técnico correspondiente para descargar la información completa y actualizada directamente desde la base de datos en formato PDF.
+                </p>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1.25rem', marginBottom: '2rem' }}>
+                  {/* Report 1: Órdenes */}
+                  <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '1.5rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '260px' }}>
+                    <div>
+                      <h5 style={{ margin: '0 0 0.5rem 0', color: 'white', fontSize: '1rem' }}>📋 Reporte de Órdenes</h5>
+                      <p style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', margin: '0 0 0.75rem 0', lineHeight: '1.4' }}>
+                        Listado general de cotizaciones, precios, abonos, métodos de pago y estados.
+                      </p>
+                      
+                      <div style={{ marginBottom: '1rem', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                        <div style={{ display: 'flex', gap: '1rem', fontSize: '0.8rem' }}>
+                          <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', cursor: 'pointer' }}>
+                            <input
+                              type="radio"
+                              name="ordersFilterType"
+                              checked={ordersFilterType === 'all'}
+                              onChange={() => setOrdersFilterType('all')}
+                            /> Todo
+                          </label>
+                          <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', cursor: 'pointer' }}>
+                            <input
+                              type="radio"
+                              name="ordersFilterType"
+                              checked={ordersFilterType === 'range'}
+                              onChange={() => setOrdersFilterType('range')}
+                            /> Por rango
+                          </label>
+                        </div>
+                        {ordersFilterType === 'range' && (
+                          <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.2rem' }}>
+                            <div style={{ flex: 1 }}>
+                              <label style={{ fontSize: '0.7rem', display: 'block', marginBottom: '0.15rem' }}>Desde</label>
+                              <input
+                                type="date"
+                                value={ordersFilterDesde}
+                                onChange={(e) => setOrdersFilterDesde(e.target.value)}
+                                style={{ padding: '0.25rem', fontSize: '0.75rem', width: '100%', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'rgba(0,0,0,0.2)', color: 'white' }}
+                              />
+                            </div>
+                            <div style={{ flex: 1 }}>
+                              <label style={{ fontSize: '0.7rem', display: 'block', marginBottom: '0.15rem' }}>Hasta</label>
+                              <input
+                                type="date"
+                                value={ordersFilterHasta}
+                                onChange={(e) => setOrdersFilterHasta(e.target.value)}
+                                style={{ padding: '0.25rem', fontSize: '0.75rem', width: '100%', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'rgba(0,0,0,0.2)', color: 'white' }}
+                              />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <button
+                      className="btn btnPrimary"
+                      style={{ width: '100%', fontSize: '0.85rem', padding: '0.6rem' }}
+                      onClick={() => handleExportPDF('Órdenes')}
+                    >
+                      📥 Descargar PDF
+                    </button>
+                  </div>
+
+                  {/* Report 2: Líneas de Fabricación */}
+                  <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '1.5rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '260px' }}>
+                    <div>
+                      <h5 style={{ margin: '0 0 0.5rem 0', color: 'white', fontSize: '1rem' }}>⚙️ Líneas de Fabricación</h5>
+                      <p style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', margin: '0 0 0.75rem 0', lineHeight: '1.4' }}>
+                        Progreso de etapas en taller (Corte, Roscado, Doblado, Pintura) y asignación de operarios.
+                      </p>
+                      
+                      <div style={{ marginBottom: '1rem' }}>
+                        <label style={{ fontSize: '0.75rem', display: 'block', marginBottom: '0.25rem' }}>Proceso:</label>
+                        <select
+                          value={fabLinesFilterProcess}
+                          onChange={(e) => setFabLinesFilterProcess(e.target.value)}
+                          style={{ padding: '0.35rem', fontSize: '0.8rem', width: '100%', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'rgba(0,0,0,0.2)', color: 'white' }}
+                        >
+                          <option value="Todos los procesos" style={{ background: '#1e293b' }}>Todos los procesos</option>
+                          <option value="Corte" style={{ background: '#1e293b' }}>Corte</option>
+                          <option value="Roscado" style={{ background: '#1e293b' }}>Roscado</option>
+                          <option value="Doblado" style={{ background: '#1e293b' }}>Doblado</option>
+                          <option value="Pintura" style={{ background: '#1e293b' }}>Pintura</option>
+                        </select>
+                      </div>
+                    </div>
+                    <button
+                      className="btn btnPrimary"
+                      style={{ width: '100%', fontSize: '0.85rem', padding: '0.6rem' }}
+                      onClick={() => handleExportPDF('Líneas de Fabricación')}
+                    >
+                      📥 Descargar PDF
+                    </button>
+                  </div>
+
+                  {/* Report 3: Materia Prima */}
+                  <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '1.5rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '260px' }}>
+                    <div>
+                      <h5 style={{ margin: '0 0 0.5rem 0', color: 'white', fontSize: '1rem' }}>📐 Catálogo de Materia Prima</h5>
+                      <p style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', margin: '0 0 1rem 0', lineHeight: '1.4' }}>
+                        Catálogo y parámetros de dimensiones (diámetro, espesor) de tubos, varillas y platinas.
+                      </p>
+                    </div>
+                    <button
+                      className="btn btnPrimary"
+                      style={{ width: '100%', fontSize: '0.85rem', padding: '0.6rem' }}
+                      onClick={() => handleExportPDF('Materia Prima')}
+                    >
+                      📥 Descargar PDF
+                    </button>
+                  </div>
+
+                  {/* Report 4: Inventario Dual */}
+                  <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '1.5rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '260px' }}>
+                    <div>
+                      <h5 style={{ margin: '0 0 0.5rem 0', color: 'white', fontSize: '1rem' }}>📦 Inventario Dual</h5>
+                      <p style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', margin: '0 0 0.75rem 0', lineHeight: '1.4' }}>
+                        Niveles de stock físico de materiales y alertas de reposición crítica de seguridad.
+                      </p>
+                      
+                      <div style={{ marginBottom: '1rem' }}>
+                        <label style={{ fontSize: '0.75rem', display: 'block', marginBottom: '0.25rem' }}>Stock mayor a (vacío = todo):</label>
+                        <input
+                          type="number"
+                          placeholder="Ej: 50"
+                          value={inventoryFilterStock}
+                          onChange={(e) => setInventoryFilterStock(e.target.value)}
+                          style={{ padding: '0.35rem', fontSize: '0.8rem', width: '100%', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'rgba(0,0,0,0.2)', color: 'white' }}
+                        />
+                      </div>
+                    </div>
+                    <button
+                      className="btn btnPrimary"
+                      style={{ width: '100%', fontSize: '0.85rem', padding: '0.6rem' }}
+                      onClick={() => handleExportPDF('Inventario Dual')}
+                    >
+                      📥 Descargar PDF
+                    </button>
+                  </div>
+
+                  {/* Report 5: Kardex de Movimientos */}
+                  <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '1.5rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '260px' }}>
+                    <div>
+                      <h5 style={{ margin: '0 0 0.5rem 0', color: 'white', fontSize: '1rem' }}>📜 Kardex de Movimientos</h5>
+                      <p style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', margin: '0 0 0.75rem 0', lineHeight: '1.4' }}>
+                        Historial detallado de entradas (compras) y salidas (consumos) en el almacén físico.
+                      </p>
+                      
+                      <div style={{ marginBottom: '1rem' }}>
+                        <label style={{ fontSize: '0.75rem', display: 'block', marginBottom: '0.25rem' }}>Fecha de inicio en adelante:</label>
+                        <input
+                          type="date"
+                          value={kardexFilterDesde}
+                          onChange={(e) => setKardexFilterDesde(e.target.value)}
+                          style={{ padding: '0.35rem', fontSize: '0.8rem', width: '100%', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'rgba(0,0,0,0.2)', color: 'white' }}
+                        />
+                      </div>
+                    </div>
+                    <button
+                      className="btn btnPrimary"
+                      style={{ width: '100%', fontSize: '0.85rem', padding: '0.6rem' }}
+                      onClick={() => handleExportPDF('Kardex de Movimientos')}
+                    >
+                      📥 Descargar PDF
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {activeTab === 'produccion' && (
           <div className="tabContent">
@@ -2271,7 +2681,7 @@ export default function Home() {
               )}
 
               {/* Modify Order Form (RF-03: Vendedor or Jefe) */}
-              {(currentUser.role === 'VENDEDOR' || currentUser.role === 'JEFE_TALLER') && (
+              {(currentUser.role === 'VENDEDOR' || currentUser.role === 'JEFE_TALLER' || currentUser.role === 'ADMIN') && (
                 <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '1rem', marginTop: '1rem' }}>
                   <h5 style={{ marginBottom: '0.5rem' }}>Modificar Parámetros de Orden</h5>
                   <div className="formRow" style={{ gap: '0.5rem' }}>
@@ -2319,7 +2729,7 @@ export default function Home() {
               )}
 
               {/* Physical release authorization triggers (RF-15) */}
-              {currentUser.role === 'JEFE_TALLER' && selectedOrder.estado === 'APROBADA' && !selectedOrder.salidaAutorizada && (
+              {(currentUser.role === 'JEFE_TALLER' || currentUser.role === 'ADMIN') && selectedOrder.estado === 'APROBADA' && !selectedOrder.salidaAutorizada && (
                 <div style={{ background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.2)', padding: '1rem', borderRadius: '8px', marginTop: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div style={{ fontSize: '0.8rem' }}>
                     <strong>Autorizar Salida del Almacén</strong>

@@ -1,7 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
+import { checkDbMode } from '@/lib/data-layer';
+import fs from 'fs';
+import path from 'path';
 
 const prisma = new PrismaClient();
+const MOCK_DB_PATH = path.join(process.cwd(), 'db.json');
+
+function readMockDb() {
+  if (!fs.existsSync(MOCK_DB_PATH)) {
+    return {
+      users: [],
+      materiaPrima: [],
+      productosFichaTecnica: [],
+      ordenesFabricacion: [],
+      detalleOrden: [],
+      procesoEtapa: [],
+      kardexInventario: [],
+      salidaAutorizada: []
+    };
+  }
+  return JSON.parse(fs.readFileSync(MOCK_DB_PATH, 'utf-8'));
+}
 
 export async function GET(request: NextRequest) {
   try {
@@ -17,66 +37,111 @@ export async function GET(request: NextRequest) {
     const fechaInicio = searchParams.get('fechaInicio');
     const fechaFin = searchParams.get('fechaFin');
 
-    const where: any = {};
+    const isPg = await checkDbMode();
+    let ordenes: any[] = [];
 
-    if (estado) {
-      where.estado = estado;
-    }
-
-    if (prioridad) {
-      where.prioridad = prioridad;
-    }
-
-    if (cliente) {
-      where.clienteNombre = {
-        contains: cliente,
-        mode: 'insensitive'
-      };
-    }
-
-    if (codigo) {
-      where.codigoCorrelativoUnico = parseInt(codigo);
-    }
-
-    if (soloUrgentes) {
-      where.prioridad = 'URGENTE';
-    }
-
-    if (soloEnProduccion) {
-      where.estado = 'EN_PRODUCCION';
-    }
-
-    if (fechaInicio || fechaFin) {
-      where.fechaComprometida = {};
-      if (fechaInicio) {
-        where.fechaComprometida.gte = new Date(fechaInicio);
+    if (isPg) {
+      const where: any = {};
+      if (estado) {
+        where.estado = estado;
       }
-      if (fechaFin) {
-        where.fechaComprometida.lte = new Date(fechaFin);
+      if (prioridad) {
+        where.prioridad = prioridad;
       }
-    }
+      if (cliente) {
+        where.clienteNombre = {
+          contains: cliente,
+          mode: 'insensitive'
+        };
+      }
+      if (codigo) {
+        where.codigoCorrelativoUnico = parseInt(codigo);
+      }
+      if (soloUrgentes) {
+        where.prioridad = 'URGENTE';
+      }
+      if (soloEnProduccion) {
+        where.estado = 'EN_PRODUCCION';
+      }
+      if (fechaInicio || fechaFin) {
+        where.fechaComprometida = {};
+        if (fechaInicio) {
+          where.fechaComprometida.gte = new Date(fechaInicio);
+        }
+        if (fechaFin) {
+          where.fechaComprometida.lte = new Date(fechaFin);
+        }
+      }
 
-    const ordenes = await prisma.ordenesFabricacion.findMany({
-      where,
-      include: {
-        detalles: {
-          include: {
-            producto: true,
-            productoComercial: true
+      ordenes = await prisma.ordenesFabricacion.findMany({
+        where,
+        include: {
+          detalles: {
+            include: {
+              producto: true,
+              productoComercial: true
+            }
+          },
+          procesos: {
+            orderBy: {
+              ordenSecuencia: 'asc'
+            }
           }
         },
-        procesos: {
-          orderBy: {
-            ordenSecuencia: 'asc'
-          }
+        orderBy: {
+          fechaComprometida: 'asc'
         }
-      },
-      orderBy: {
-        fechaComprometida: 'asc'
-      }
-    });
+      });
+    } else {
+      const db = readMockDb();
+      ordenes = db.ordenesFabricacion.map((o: any) => {
+        const details = db.detalleOrden
+          .filter((d: any) => d.ordenId === o.id)
+          .map((d: any) => {
+            const prod = db.productosFichaTecnica.find((p: any) => p.id === d.productoId);
+            return { ...d, producto: prod };
+          });
+        const stages = db.procesoEtapa
+          .filter((pe: any) => pe.ordenId === o.id)
+          .sort((a: any, b: any) => a.ordenSecuencia - b.ordenSecuencia);
 
-    // Calcular días restantes o de retraso para cada orden
+        return {
+          ...o,
+          detalles: details,
+          procesos: stages
+        };
+      });
+
+      if (estado) {
+        ordenes = ordenes.filter((o: any) => o.estado === estado);
+      }
+      if (prioridad) {
+        ordenes = ordenes.filter((o: any) => o.prioridad === prioridad);
+      }
+      if (cliente) {
+        ordenes = ordenes.filter((o: any) => o.clienteNombre.toLowerCase().includes(cliente.toLowerCase()));
+      }
+      if (codigo) {
+        ordenes = ordenes.filter((o: any) => o.codigoCorrelativoUnico === parseInt(codigo));
+      }
+      if (soloUrgentes) {
+        ordenes = ordenes.filter((o: any) => o.prioridad === 'URGENTE');
+      }
+      if (soloEnProduccion) {
+        ordenes = ordenes.filter((o: any) => o.estado === 'EN_PRODUCCION');
+      }
+      if (fechaInicio) {
+        const start = new Date(fechaInicio).getTime();
+        ordenes = ordenes.filter((o: any) => new Date(o.fechaComprometida).getTime() >= start);
+      }
+      if (fechaFin) {
+        const end = new Date(fechaFin).getTime();
+        ordenes = ordenes.filter((o: any) => new Date(o.fechaComprometida).getTime() <= end);
+      }
+
+      ordenes.sort((a: any, b: any) => new Date(a.fechaComprometida).getTime() - new Date(b.fechaComprometida).getTime());
+    }
+
     const ordenesConCalculos = ordenes.map(orden => {
       const hoy = new Date();
       hoy.setHours(0, 0, 0, 0);
@@ -93,7 +158,6 @@ export async function GET(request: NextRequest) {
       };
     });
 
-    // Filtrar órdenes atrasadas si se solicita
     const resultadoFinal = soloAtrasadas 
       ? ordenesConCalculos.filter(o => o.estaAtrasada)
       : ordenesConCalculos;
